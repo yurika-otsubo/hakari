@@ -22,6 +22,7 @@
 </style>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body>
@@ -138,12 +139,14 @@ function aiHeaders() {
   };
 }
 async function callClaude(system, user, maxTokens = 1024) {
+  if (!API_KEY) throw new Error("NO_KEY");
   const res = await fetch(API_URL, { method: "POST", headers: aiHeaders(), body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] }) });
   if (!res.ok) throw new Error("API " + res.status);
   const data = await res.json();
   return data.content.filter((b) => b.type === "text").map((b) => b.text).join("\n");
 }
 async function callClaudeChat(system, messages, maxTokens = 1024) {
+  if (!API_KEY) throw new Error("NO_KEY");
   const res = await fetch(API_URL, { method: "POST", headers: aiHeaders(), body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system, messages }) });
   if (!res.ok) throw new Error("API " + res.status);
   const data = await res.json();
@@ -190,10 +193,22 @@ async function chatReply(profile, targets, history) {
   return (await callClaudeChat(sys, history.map((m) => ({ role: m.role, content: m.content })))).trim();
 }
 
-/* ===== storage ===== */
-const KEY = "hakari:v1";
-function loadState() { try { const r = localStorage.getItem(KEY); return r ? JSON.parse(r) : null; } catch { return null; } }
-function saveState(s) { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {} }
+/* ===== supabase (cloud + auth) ===== */
+const SB_URL = "https://wwzlptnuiedsiwrltoxf.supabase.co";
+const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind3emxwdG51aWVkc2l3cmx0b3hmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1MDc4MzIsImV4cCI6MjA5NzA4MzgzMn0.U21uYswBbchGZJLhbW50W-2-DtEE5MgNQ62ThchmTKg";
+const sb = window.supabase.createClient(SB_URL, SB_KEY);
+
+async function signInGoogle() { await sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } }); }
+async function signOutUser() { await sb.auth.signOut(); }
+async function cloudLoad(userId) {
+  const { data, error } = await sb.from("app_data").select("data").eq("user_id", userId).maybeSingle();
+  if (error) throw error;
+  return data ? data.data : null;
+}
+async function cloudSave(userId, dataObj) {
+  const { error } = await sb.from("app_data").upsert({ user_id: userId, data: dataObj, updated_at: new Date().toISOString() });
+  if (error) throw error;
+}
 
 const DEFAULT_PROFILE = {
   age: 30, sex: "female", height: 160, weight: 55,
@@ -366,22 +381,26 @@ function Lever({ label, levers, value, onChange, color }) {
   );
 }
 
-/* ===== key gate ===== */
-function KeyGate({ onSaved }) {
-  const [k, setK] = useState("");
+/* ===== splash / login ===== */
+function Splash({ text }) {
+  return (
+    <div style={{ fontFamily: FONT_BODY, background: C.canvas, color: C.inkSoft, minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12 }}>
+      <div style={{ fontFamily: FONT_DISP, fontSize: 26, letterSpacing: 4, color: C.ink }}>{APP_NAME}</div>
+      <div style={{ display: "inline-flex", gap: 8, alignItems: "center", fontSize: 13 }}>
+        <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> {text || "読み込んでいます…"}
+      </div>
+    </div>
+  );
+}
+function LoginGate() {
   return (
     <div style={{ fontFamily: FONT_BODY, background: C.canvas, color: C.ink, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <div style={{ maxWidth: 380, width: "100%" }}>
-        <div style={{ fontFamily: FONT_DISP, fontSize: 30, letterSpacing: 4, textAlign: "center", marginBottom: 6 }}>{APP_NAME}</div>
-        <div style={{ fontSize: 13, color: C.inkSoft, textAlign: "center", marginBottom: 20, lineHeight: 1.7 }}>はじめに、Anthropic の API キーを入れてください。キーはこの端末の中だけに保存され、外部には送られません。</div>
+        <div style={{ fontFamily: FONT_DISP, fontSize: 32, letterSpacing: 5, textAlign: "center", marginBottom: 8 }}>{APP_NAME}</div>
+        <div style={{ fontSize: 13, color: C.inkSoft, textAlign: "center", marginBottom: 24, lineHeight: 1.8 }}>ログインすると、PC・スマホ・タブレットで記録が同期されます。</div>
         <Card>
-          <Field label="APIキー（sk-ant- で始まる）">
-            <input value={k} onChange={(e) => setK(e.target.value)} type="password" placeholder="sk-ant-..." style={inputStyle} autoComplete="off" />
-          </Field>
-          <PrimaryBtn onClick={() => { if (k.trim()) { setApiKey(k.trim()); onSaved(); } }} disabled={!k.trim()} style={{ marginTop: 12 }}>はじめる</PrimaryBtn>
-          <div style={{ fontSize: 11.5, color: C.inkSoft, marginTop: 12, lineHeight: 1.7 }}>
-            キーは <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" style={{ color: C.moss }}>console.anthropic.com</a> で発行できます（支払い方法の登録が必要・利用量に応じた従量課金）。
-          </div>
+          <PrimaryBtn onClick={signInGoogle}>Google でログイン</PrimaryBtn>
+          <div style={{ fontSize: 11.5, color: C.inkSoft, marginTop: 14, lineHeight: 1.7 }}>あなたのデータは本人だけが読み書きできます。ログイン後、「設定」でからだの情報とAIのキーを登録できます。</div>
         </Card>
         <div style={{ fontSize: 11, color: C.inkFaint, textAlign: "center", lineHeight: 1.6, padding: "12px 8px 0" }}>健康・栄養の最終判断は、検査機関や医師・管理栄養士にご相談ください。</div>
       </div>
@@ -391,23 +410,65 @@ function KeyGate({ onSaved }) {
 
 /* ===== main ===== */
 function App() {
-  const [hasKey, setHasKey] = useState(!!API_KEY);
+  const [session, setSession] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [dataLoaded, setDataLoaded] = useState(false);
+  const [syncErr, setSyncErr] = useState("");
   const [screen, setScreen] = useState("home");
-  const [profile, setProfile] = useState(() => { const s = loadState(); return s && s.profile ? { ...DEFAULT_PROFILE, ...s.profile } : DEFAULT_PROFILE; });
-  const [foodLog, setFoodLog] = useState(() => (loadState() || {}).foodLog || []);
-  const [favorites, setFavorites] = useState(() => (loadState() || {}).favorites || []);
-  const [bodyLog, setBodyLog] = useState(() => (loadState() || {}).bodyLog || []);
-  const [chatLog, setChatLog] = useState(() => (loadState() || {}).chatLog || []);
-  const [onboarded, setOnboarded] = useState(() => (loadState() || {}).onboarded || false);
 
-  useEffect(() => { saveState({ profile, foodLog, favorites, bodyLog, chatLog: chatLog.slice(-40), onboarded }); }, [profile, foodLog, favorites, bodyLog, chatLog, onboarded]);
+  const [profile, setProfile] = useState(DEFAULT_PROFILE);
+  const [foodLog, setFoodLog] = useState([]);
+  const [favorites, setFavorites] = useState([]);
+  const [bodyLog, setBodyLog] = useState([]);
+  const [chatLog, setChatLog] = useState([]);
+  const [onboarded, setOnboarded] = useState(false);
+  const saveTimer = useRef(null);
+
+  // auth
+  useEffect(() => {
+    sb.auth.getSession().then(({ data }) => { setSession(data.session); setAuthReady(true); });
+    const { data: sub } = sb.auth.onAuthStateChange((_e, s) => setSession(s));
+    return () => { if (sub && sub.subscription) sub.subscription.unsubscribe(); };
+  }, []);
+
+  // load cloud data on login
+  useEffect(() => {
+    if (!session) { setDataLoaded(false); return; }
+    let cancel = false;
+    (async () => {
+      try {
+        const d = await cloudLoad(session.user.id);
+        if (cancel) return;
+        if (d) {
+          setProfile({ ...DEFAULT_PROFILE, ...(d.profile || {}) });
+          setFoodLog(d.foodLog || []); setFavorites(d.favorites || []);
+          setBodyLog(d.bodyLog || []); setChatLog(d.chatLog || []);
+          setOnboarded(d.onboarded || false);
+        }
+        setDataLoaded(true);
+      } catch (e) { if (!cancel) { setSyncErr("クラウドからの読み込みに失敗しました。"); setDataLoaded(true); } }
+    })();
+    return () => { cancel = true; };
+  }, [session]);
+
+  // save (debounced) after loaded
+  useEffect(() => {
+    if (!session || !dataLoaded) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      cloudSave(session.user.id, { profile, foodLog, favorites, bodyLog, chatLog: chatLog.slice(-40), onboarded })
+        .then(() => setSyncErr("")).catch(() => setSyncErr("クラウド保存に失敗しました（通信をご確認ください）。"));
+    }, 800);
+  }, [session, dataLoaded, profile, foodLog, favorites, bodyLog, chatLog, onboarded]);
 
   const targets = useMemo(() => computeTargets(profile), [profile]);
   const today = todayKey();
   const todayRows = foodLog.filter((r) => r.date === today);
   const todaySum = sumLog(todayRows);
 
-  if (!hasKey) return <KeyGate onSaved={() => setHasKey(true)} />;
+  if (!authReady) return <Splash />;
+  if (!session) return <LoginGate />;
+  if (!dataLoaded) return <Splash text="データを読み込んでいます…" />;
 
   return (
     <div style={{ fontFamily: FONT_BODY, background: C.canvas, color: C.ink, maxWidth: 460, margin: "0 auto", minHeight: "100vh", position: "relative" }}>
@@ -415,6 +476,8 @@ function App() {
         <div style={{ fontFamily: FONT_DISP, fontSize: 22, letterSpacing: 3 }}>{APP_NAME}</div>
         <div style={{ fontSize: 12, color: C.inkSoft }}>{new Date().getMonth() + 1}月{new Date().getDate()}日</div>
       </div>
+
+      {syncErr && <div style={{ margin: "0 16px 8px", fontSize: 11.5, color: C.protein, background: "#FBEDE7", border: `1px solid ${C.line}`, borderRadius: 10, padding: "8px 12px" }}>{syncErr}</div>}
 
       <div style={{ padding: "0 16px 120px", animation: "fade .3s ease" }}>
         {!onboarded && screen !== "settings" && (
@@ -428,7 +491,7 @@ function App() {
         {screen === "record" && <RecordScreen today={today} todaySum={todaySum} todayRows={todayRows} setFoodLog={setFoodLog} favorites={favorites} setFavorites={setFavorites} />}
         {screen === "body" && <BodyScreen bodyLog={bodyLog} setBodyLog={setBodyLog} />}
         {screen === "chat" && <ChatScreen profile={profile} targets={targets} chatLog={chatLog} setChatLog={setChatLog} />}
-        {screen === "settings" && <SettingsScreen profile={profile} setProfile={setProfile} targets={targets} onDone={() => { setOnboarded(true); setScreen("home"); }} onResetKey={() => { setApiKey(""); setHasKey(false); }} />}
+        {screen === "settings" && <SettingsScreen profile={profile} setProfile={setProfile} targets={targets} email={session.user.email} onDone={() => { setOnboarded(true); setScreen("home"); }} onSignOut={signOutUser} />}
       </div>
 
       <div style={{ position: "sticky", bottom: 0, maxWidth: 460, margin: "0 auto", background: "rgba(251,250,246,.94)", backdropFilter: "blur(8px)", borderTop: `1px solid ${C.line}`, display: "flex", padding: "8px 4px calc(14px + env(safe-area-inset-bottom))" }}>
@@ -454,7 +517,7 @@ function HomeScreen({ profile, targets, todaySum, today, setFoodLog }) {
 
   const ctx = { targetKcal: targets.targetKcal, eatenKcal: todaySum.kcal, pG: targets.pG, fG: targets.fG, cG: targets.cG, p: todaySum.p, f: todaySum.f, c: todaySum.c, tone: profile.tone, callName: profile.callName, constitution: profile.constitution, prefs: profile.prefs, ingredients };
 
-  const refresh = async () => { setLoading(true); try { setPoint(await companionPoint(ctx)); } catch { setPoint("ポイントを取得できませんでした（APIキーや通信をご確認ください）。記録は続けられます。"); } setLoading(false); };
+  const refresh = async () => { setLoading(true); try { setPoint(await companionPoint(ctx)); } catch { setPoint("ポイントを取得できませんでした（AIを使うには「設定」でAPIキーを登録してください。通信エラーの場合もあります）。記録は続けられます。"); } setLoading(false); };
   useEffect(() => { refresh(); }, [todaySum.kcal, profile.tone]);
 
   const getSuggestion = async () => { setSugLoading(true); setRecipes({}); setAddedIdx(null); try { setOptions(await suggestMeal(ctx)); } catch { setOptions([]); } setSugLoading(false); };
@@ -531,7 +594,7 @@ function RecordScreen({ today, todaySum, todayRows, setFoodLog, favorites, setFa
       setDraft({ entries: entries.length ? entries : [{ ...blankEntry(), name: text.trim() }], confidence: r.confidence || "medium", note: r.note || "" });
     } catch {
       setDraft({ entries: [{ ...blankEntry(), name: text.trim() }], confidence: "low", note: "自動推定に失敗しました。数値を手で入力してください。" });
-      setError("推定に失敗しました（APIキーや通信をご確認ください）。手入力モードにしました。");
+      setError("推定に失敗しました（AIを使うには「設定」でAPIキーを登録してください。通信エラーの場合もあります）。手入力モードにしました。");
     }
     setLoading(false);
   };
@@ -704,7 +767,7 @@ function ChatScreen({ profile, targets, chatLog, setChatLog }) {
     const next = [...chatLog, { role: "user", content }];
     setChatLog(next); setInput(""); setLoading(true);
     try { const reply = await chatReply(profile, targets, next); setChatLog([...next, { role: "assistant", content: reply }]); }
-    catch { setChatLog([...next, { role: "assistant", content: "うまく返信できませんでした（APIキーや通信をご確認ください）。" }]); }
+    catch { setChatLog([...next, { role: "assistant", content: "うまく返信できませんでした（AIを使うには「設定」でAPIキーを登録してください。通信エラーの場合もあります）。" }]); }
     setLoading(false);
   };
   const chips = ["最近モチベが下がってきた", "プロテインって必要？", "停滞期かもしれない", "外食が続くときのコツは？"];
@@ -738,12 +801,14 @@ function ChatScreen({ profile, targets, chatLog, setChatLog }) {
 }
 
 /* ===== SETTINGS ===== */
-function SettingsScreen({ profile, setProfile, targets, onDone, onResetKey }) {
+function SettingsScreen({ profile, setProfile, targets, onDone, email, onSignOut }) {
   const set = (k, v) => setProfile((p) => ({ ...p, [k]: v }));
   const [diag, setDiag] = useState("");
   const [diagLoading, setDiagLoading] = useState(false);
   const [proposal, setProposal] = useState(null);
   const [diagErr, setDiagErr] = useState("");
+  const [keyInput, setKeyInput] = useState("");
+  const [keySaved, setKeySaved] = useState(!!API_KEY);
 
   const runDiag = async () => { if (!diag.trim()) return; setDiagLoading(true); setDiagErr(""); setProposal(null); try { setProposal(await proposeLevers(diag.trim())); } catch { setDiagErr("読み取りに失敗しました。レバーは手動で設定できます。"); } setDiagLoading(false); };
   const applyProposal = () => { if (FAT_LEVERS[proposal.fatLever]) set("fatLever", proposal.fatLever); if (PRO_LEVERS[proposal.proteinLever]) set("proteinLever", proposal.proteinLever); if (diag.trim()) set("constitution", diag.trim()); setProposal(null); setDiag(""); };
@@ -811,9 +876,24 @@ function SettingsScreen({ profile, setProfile, targets, onDone, onResetKey }) {
       </Card>
 
       <Card style={{ marginBottom: 14 }}>
-        <Eyebrow>APIキー</Eyebrow>
-        <div style={{ fontSize: 12.5, color: C.inkSoft, margin: "8px 0 12px", lineHeight: 1.6 }}>キーはこの端末内に保存されています。別のキーに変えるときや、端末から消すときはこちら。</div>
-        <GhostBtn onClick={onResetKey}>APIキーを入れ直す / 削除</GhostBtn>
+        <Eyebrow>AIのAPIキー</Eyebrow>
+        <div style={{ fontSize: 12.5, color: C.inkSoft, margin: "8px 0 12px", lineHeight: 1.6 }}>
+          推定・提案・相談のAI機能に必要です。キーは<b>この端末の中だけ</b>に保存され（同期はされません）、外部には送られません。状態：<b style={{ color: keySaved ? C.moss : C.protein }}>{keySaved ? "登録済み" : "未登録"}</b>
+        </div>
+        <Field label="APIキー（sk-ant- で始まる）">
+          <input value={keyInput} onChange={(e) => setKeyInput(e.target.value)} type="password" placeholder={keySaved ? "別のキーに変更する場合のみ入力" : "sk-ant-..."} style={inputStyle} autoComplete="off" />
+        </Field>
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <PrimaryBtn onClick={() => { if (keyInput.trim()) { setApiKey(keyInput.trim()); setKeySaved(true); setKeyInput(""); } }} disabled={!keyInput.trim()}><Check size={15} /> キーを保存</PrimaryBtn>
+          {keySaved && <GhostBtn onClick={() => { setApiKey(""); setKeySaved(false); }} style={{ width: "auto" }}>削除</GhostBtn>}
+        </div>
+        <div style={{ fontSize: 11.5, color: C.inkSoft, marginTop: 12, lineHeight: 1.7 }}>キーは <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" style={{ color: C.moss }}>console.anthropic.com</a> で発行できます（従量課金）。</div>
+      </Card>
+
+      <Card style={{ marginBottom: 14 }}>
+        <Eyebrow>アカウント</Eyebrow>
+        <div style={{ fontSize: 12.5, color: C.inkSoft, margin: "8px 0 12px", lineHeight: 1.6 }}>ログイン中：{email || "—"}</div>
+        <GhostBtn onClick={onSignOut}>ログアウト</GhostBtn>
       </Card>
 
       <PrimaryBtn onClick={onDone} style={{ marginBottom: 8 }}><Check size={16} /> 保存してホームへ</PrimaryBtn>
