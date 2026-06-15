@@ -175,24 +175,61 @@ async function companionPoint(ctx) {
   const u = `目標カロリー${ctx.targetKcal}/摂取${ctx.eatenKcal}/残り${ctx.targetKcal - ctx.eatenKcal}kcal。たんぱく質 残り${ctx.pG - ctx.p}g、脂質 残り${ctx.fG - ctx.f}g、炭水化物 残り${ctx.cG - ctx.c}g。体質メモ:${ctx.constitution || "なし"}。`;
   return (await callClaude(sys, u)).trim();
 }
+function recentSummary(foodLog, today) {
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 21);
+  const cut = cutoff.toISOString().slice(0, 10);
+  const buckets = { 朝: {}, 昼: {}, 夜: {} };
+  foodLog.forEach((r) => {
+    if (r.date === today || r.date < cut) return;
+    const h = parseInt((r.time || "12:00").slice(0, 2), 10);
+    const b = h < 11 ? "朝" : h < 16 ? "昼" : "夜";
+    const name = (r.text || "").trim(); if (!name) return;
+    buckets[b][name] = (buckets[b][name] || 0) + 1;
+  });
+  const top = (o) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([n, c]) => `${n}×${c}`).join("、");
+  const parts = [];
+  ["朝", "昼", "夜"].forEach((b) => { const t = top(buckets[b]); if (t) parts.push(`${b}: ${t}`); });
+  return parts.join(" / ");
+}
 async function suggestMeal(ctx) {
-  const hasIng = ctx.ingredients && ctx.ingredients.trim();
-  const sys = "あなたはダイエットの伴走アシスタント。残りのカロリー・PFC・体質・好み・今ある材料を踏まえ、次の食事メニュー候補を1〜2案出す。" +
-    (hasIng ? "【最重要】『今ある材料』が入力されている場合は、その材料を主役にしたメニューにすること。原則その材料を使い、入力に無い食材は最小限の補助（調味料・基本食材）に留める。『好み』はあくまで味付けや方向性の参考で、好みに書かれた食材を勝手に主役にしない。" : "") +
-    "励ましや前置きの一言は不要。出力はJSONのみ、コードフェンス禁止。各案に name(メニュー名), kcal, p, f, c, note(30字以内の一言) を入れる。脂質や吸収への配慮など体質メモがあれば反映。" +
+  const over = ctx.eatenKcal > ctx.targetKcal;
+  const remain = ctx.targetKcal - ctx.eatenKcal;
+  const hasIng = ctx.mode === "cook" && ctx.ingredients && ctx.ingredients.trim();
+  const common =
+    "あなたはダイエットの伴走アシスタント。次の食事の候補を1〜2案出す。守ること：" +
+    "(1) 一食として成立する常識的な組み合わせにする（主菜・副菜・必要なら主食。甘い物と味噌汁のようなちぐはぐな同梱はしない）。" +
+    "(2) 『今日すでに食べたもの』と主食・主材料を被らせない。" +
+    "(3) 『普段の傾向』には自然に沿う（よく食べる系統や食材を尊重）。ただし(2)を優先。" +
+    "(4) 残りのPFCに沿う（炭水化物が多い日は主食控えめでたんぱく質寄り等）。" +
+    "(5) 好みは方向性の参考。好みの食材を毎回主役にしない。" +
+    (over ? "(6) 【重要】今日はすでにカロリー超過。重い一食を勧めず、汁物・サラダ・たんぱく質少量など軽いものや『次の食事で調整』の方向で、無理のない控えめな提案にする。" : "") +
+    (ctx.avoidNames && ctx.avoidNames.length ? `(7) 次の案は出さず別案にする：${ctx.avoidNames.join("、")}。` : "") +
+    "励ましや前置きは不要。出力はJSONのみ、コードフェンス禁止。各案に name, kcal, p, f, c, note(30字以内) を入れる。";
+  const cookSys = common + (hasIng ? "今ある材料が入力されているので、それを主役にした自炊メニューにする。入力に無い食材は最小限の補助に留める。" : "自炊で作れるメニューにする。");
+  const eatoutSys = common + "これは外食・デリバリー(Uber等)向け。具材レシピではなく『どの店種・料理ジャンルで、何を、どう頼むか(ごはん少なめ等の調整を含む)』を提案する。実在店舗名やメニューは断定せず一般的な選び方にする。name は料理や頼み方、note に選び方のコツ。";
+  const sys = (ctx.mode === "eatout" ? eatoutSys : cookSys) +
     'スキーマ:{"options":[{"name":string,"kcal":number,"p":number,"f":number,"c":number,"note":string}]}';
-  const u = `残り${ctx.targetKcal - ctx.eatenKcal}kcal。残りP${ctx.pG - ctx.p}g/F${ctx.fG - ctx.f}g/C${ctx.cG - ctx.c}g。体質メモ:${ctx.constitution || "なし"}。今ある材料(最優先):${ctx.ingredients || "未入力"}。好み(味付けの参考程度):${ctx.prefs || "なし"}。`;
+  const u =
+    `残り${remain}kcal（${over ? "超過中" : "以内が目安"}）。残りP${ctx.pG - ctx.p}g/F${ctx.fG - ctx.f}g/C${ctx.cG - ctx.c}g。` +
+    `今日すでに食べたもの:${(ctx.todayItems && ctx.todayItems.length) ? ctx.todayItems.join("、") : "なし"}。` +
+    `普段の傾向:${ctx.historySummary || "まだデータが少ない"}。体質メモ:${ctx.constitution || "なし"}。好み:${ctx.prefs || "なし"}。` +
+    (ctx.mode === "cook" ? `今ある材料(最優先):${ctx.ingredients || "未入力"}。` : "");
   const r = parseJSON(await callClaude(sys, u));
   return r.options || [];
 }
-async function getRecipe(ctx, mealName) {
-  const hasIng = ctx.ingredients && ctx.ingredients.trim();
-  const sys = "選ばれたメニューの具体的なレシピを作る。" +
-    (hasIng ? "【最重要】『今ある材料』が入力されているので、その材料を主役にしたレシピにすること。入力に無い食材は調味料や基本食材などの最小限に留め、好みに書かれた食材を主役に持ち込まない。" : "") +
-    "具材は分量を必ずg（または個数＋g目安）まで明記し、何も考えず作れるようにする。ユーザーは食べ過ぎてカロリーオーバーしがちなので、1人前の分量を守れる現実的な量にし、作りすぎない分量にする。手順は簡潔な箇条書き。kcalとPFCはそのレシピ1人前の値。出力はJSONのみ、コードフェンス禁止。" +
-    'スキーマ:{"title":string,"servings":number,"ingredients":[{"item":string,"amount":string}],"steps":[string],"kcal":number,"p":number,"f":number,"c":number,"tip":string}';
-  const u = `メニュー:${mealName}。1人前が残り${ctx.targetKcal - ctx.eatenKcal}kcal以内に収まるのが目安。今ある材料(最優先で使う):${ctx.ingredients || "未入力"}。好み(味付けの参考程度):${ctx.prefs || "なし"}。体質メモ:${ctx.constitution || "なし"}。`;
-  return parseJSON(await callClaude(sys, u, 1500));
+async function getRecipe(ctx, mealName, mode) {
+  const hasIng = mode === "cook" && ctx.ingredients && ctx.ingredients.trim();
+  const cookSys = "選ばれたメニューの具体的なレシピを作る。" +
+    (hasIng ? "【最重要】今ある材料を主役にし、入力に無い食材は調味料や基本食材などの最小限に留める。" : "") +
+    "具材は分量を必ずg(または個数＋g目安)まで明記し、何も考えず作れるようにする。ユーザーは食べ過ぎがちなので1人前の分量を守れる現実的な量にする。手順は簡潔な箇条書き。" +
+    'ingredients は材料、steps は作り方。出力はJSONのみ、コードフェンス禁止。スキーマ:{"title":string,"servings":number,"ingredients":[{"item":string,"amount":string}],"steps":[string],"kcal":number,"p":number,"f":number,"c":number,"tip":string}';
+  const eatoutSys = "選ばれた外食・デリバリーのメニューについて頼み方ガイドを作る。" +
+    "ingredients には『注文する品と量の目安』(例 item:焼き魚定食, amount:ごはん少なめ150g)、steps には『店での選び方・頼み方・避けるポイント』を箇条書きで。実在店舗名やメニューは断定しない。kcal/PFCは目安。servings は1。" +
+    '出力はJSONのみ、コードフェンス禁止。スキーマ:{"title":string,"servings":number,"ingredients":[{"item":string,"amount":string}],"steps":[string],"kcal":number,"p":number,"f":number,"c":number,"tip":string}';
+  const u = `メニュー:${mealName}。1人前が残り${ctx.targetKcal - ctx.eatenKcal}kcal以内が目安。` +
+    (mode === "cook" ? `今ある材料(最優先で使う):${ctx.ingredients || "未入力"}。` : "") +
+    `好み(参考程度):${ctx.prefs || "なし"}。体質メモ:${ctx.constitution || "なし"}。`;
+  return parseJSON(await callClaude(mode === "eatout" ? eatoutSys : cookSys, u, 1500));
 }
 async function chatReply(profile, targets, history) {
   const sys = `あなたは「${APP_NAME}」というダイエット伴走アプリの相談相手。一般的なダイエット・栄養・運動・習慣・モチベーションの相談に、わかりやすく現実的に答える。` + toneNoteOf(profile.tone) + callNameNote(profile.callName) + "健康的で持続可能な方法を重視し、極端な制限や急激な減量はすすめない。サプリや特定商品は効果を断定保証せず、一般的な情報と『専門家に相談を』の姿勢で答える。病気・症状・検査数値の解釈など医学的判断が必要な話題は、医師・管理栄養士など専門家への相談をやさしくすすめる。ユーザーが心身の不調や極端な制限に向かう様子があれば、無理を勧めず気づかう。回答は簡潔に。" + `参考(ユーザー設定): 目標${targets.targetKcal}kcal/PFC ${targets.pPct}:${targets.fPct}:${targets.cPct}。体質メモ:${profile.constitution || "なし"}。好み:${profile.prefs || "なし"}。`;
@@ -338,12 +375,13 @@ function MiniLineChart({ data }) {
     </svg>
   );
 }
-function RecipeView({ r, added, onLog }) {
+function RecipeView({ r, added, onLog, mode }) {
+  const eat = mode === "eatout";
   return (
     <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.line}` }}>
-      <div style={{ fontFamily: FONT_DISP, fontSize: 15 }}>{r.title}{r.servings ? `（${r.servings}人前）` : ""}</div>
-      <div style={{ fontSize: 11, color: C.inkSoft, margin: "4px 0 12px" }}>{r.kcal}kcal · P{r.p} F{r.f} C{r.c}</div>
-      <div style={{ fontSize: 11.5, fontWeight: 700, color: C.inkSoft, marginBottom: 4 }}>材料</div>
+      <div style={{ fontFamily: FONT_DISP, fontSize: 15 }}>{r.title}{!eat && r.servings ? `（${r.servings}人前）` : ""}</div>
+      <div style={{ fontSize: 11, color: C.inkSoft, margin: "4px 0 12px" }}>{r.kcal}kcal · P{r.p} F{r.f} C{r.c}{eat ? "（目安）" : ""}</div>
+      <div style={{ fontSize: 11.5, fontWeight: 700, color: C.inkSoft, marginBottom: 4 }}>{eat ? "注文の目安" : "材料"}</div>
       <div style={{ marginBottom: 12 }}>
         {(r.ingredients || []).map((ing, j) => (
           <div key={j} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13, padding: "4px 0", borderBottom: `1px solid ${C.line}` }}>
@@ -351,7 +389,7 @@ function RecipeView({ r, added, onLog }) {
           </div>
         ))}
       </div>
-      <div style={{ fontSize: 11.5, fontWeight: 700, color: C.inkSoft, marginBottom: 4 }}>作り方</div>
+      <div style={{ fontSize: 11.5, fontWeight: 700, color: C.inkSoft, marginBottom: 4 }}>{eat ? "頼み方のコツ" : "作り方"}</div>
       <ol style={{ margin: "0 0 12px", paddingLeft: 18, fontSize: 13, lineHeight: 1.75 }}>
         {(r.steps || []).map((s, j) => <li key={j} style={{ marginBottom: 3 }}>{s}</li>)}
       </ol>
@@ -492,7 +530,7 @@ function App() {
             <PrimaryBtn onClick={() => setScreen("settings")}>設定をひらく</PrimaryBtn>
           </Card>
         )}
-        {screen === "home" && <HomeScreen profile={profile} targets={targets} todaySum={todaySum} today={today} setFoodLog={setFoodLog} />}
+        {screen === "home" && <HomeScreen profile={profile} targets={targets} todaySum={todaySum} today={today} foodLog={foodLog} setFoodLog={setFoodLog} />}
         {screen === "record" && <RecordScreen today={today} todaySum={todaySum} todayRows={todayRows} setFoodLog={setFoodLog} favorites={favorites} setFavorites={setFavorites} />}
         {screen === "body" && <BodyScreen bodyLog={bodyLog} setBodyLog={setBodyLog} />}
         {screen === "chat" && <ChatScreen profile={profile} targets={targets} chatLog={chatLog} setChatLog={setChatLog} />}
@@ -510,9 +548,10 @@ function App() {
 }
 
 /* ===== HOME ===== */
-function HomeScreen({ profile, targets, todaySum, today, setFoodLog }) {
+function HomeScreen({ profile, targets, todaySum, today, foodLog, setFoodLog }) {
   const [point, setPoint] = useState("");
   const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState("cook");
   const [ingredients, setIngredients] = useState("");
   const [options, setOptions] = useState(null);
   const [sugLoading, setSugLoading] = useState(false);
@@ -520,13 +559,22 @@ function HomeScreen({ profile, targets, todaySum, today, setFoodLog }) {
   const [recipeLoading, setRecipeLoading] = useState(null);
   const [addedIdx, setAddedIdx] = useState(null);
 
-  const ctx = { targetKcal: targets.targetKcal, eatenKcal: todaySum.kcal, pG: targets.pG, fG: targets.fG, cG: targets.cG, p: todaySum.p, f: todaySum.f, c: todaySum.c, tone: profile.tone, callName: profile.callName, constitution: profile.constitution, prefs: profile.prefs, ingredients };
+  const todayItems = useMemo(() => foodLog.filter((r) => r.date === today).map((r) => r.text), [foodLog, today]);
+  const historySummary = useMemo(() => recentSummary(foodLog, today), [foodLog, today]);
 
-  const refresh = async () => { setLoading(true); try { setPoint(await companionPoint(ctx)); } catch { setPoint("ポイントを取得できませんでした（AIを使うには「設定」でAPIキーを登録してください。通信エラーの場合もあります）。記録は続けられます。"); } setLoading(false); };
+  const baseCtx = { targetKcal: targets.targetKcal, eatenKcal: todaySum.kcal, pG: targets.pG, fG: targets.fG, cG: targets.cG, p: todaySum.p, f: todaySum.f, c: todaySum.c, tone: profile.tone, callName: profile.callName, constitution: profile.constitution, prefs: profile.prefs };
+  const sugCtx = { ...baseCtx, mode, ingredients, todayItems, historySummary };
+
+  const refresh = async () => { setLoading(true); try { setPoint(await companionPoint(baseCtx)); } catch { setPoint("ポイントを取得できませんでした（AIを使うには「設定」でAPIキーを登録してください。通信エラーの場合もあります）。記録は続けられます。"); } setLoading(false); };
   useEffect(() => { refresh(); }, [todaySum.kcal, profile.tone]);
 
-  const getSuggestion = async () => { setSugLoading(true); setRecipes({}); setAddedIdx(null); try { setOptions(await suggestMeal(ctx)); } catch { setOptions([]); } setSugLoading(false); };
-  const openRecipe = async (i, name) => { setRecipeLoading(i); try { const r = await getRecipe(ctx, name); setRecipes((m) => ({ ...m, [i]: r })); } catch { setRecipes((m) => ({ ...m, [i]: { error: true } })); } setRecipeLoading(null); };
+  const runSuggest = async (reroll) => {
+    setSugLoading(true); setRecipes({}); setAddedIdx(null);
+    const avoidNames = reroll && options ? options.map((o) => o.name) : [];
+    try { setOptions(await suggestMeal({ ...sugCtx, avoidNames })); } catch { setOptions([]); }
+    setSugLoading(false);
+  };
+  const openRecipe = async (i, name) => { setRecipeLoading(i); try { const r = await getRecipe(sugCtx, name, mode); setRecipes((m) => ({ ...m, [i]: { ...r, _mode: mode } })); } catch { setRecipes((m) => ({ ...m, [i]: { error: true } })); } setRecipeLoading(null); };
   const logRecipe = (i, r) => { setFoodLog((prev) => [{ id: Date.now(), date: today, time: nowHHMM(), text: r.title, kcal: Math.round(r.kcal || 0), p: Math.round(r.p || 0), f: Math.round(r.f || 0), c: Math.round(r.c || 0) }, ...prev]); setAddedIdx(i); };
 
   const target3 = { p: targets.pPct, f: targets.fPct, c: targets.cPct };
@@ -560,21 +608,27 @@ function HomeScreen({ profile, targets, todaySum, today, setFoodLog }) {
 
       <Card>
         <Eyebrow>メニューを提案してもらう</Eyebrow>
-        <div style={{ fontSize: 12.5, color: C.inkSoft, margin: "8px 0 10px" }}>残りの枠・体質・好みをふまえて提案します。「これで作る」を選ぶと、分量(g)まで入った具体的なレシピが出ます。</div>
-        <input value={ingredients} onChange={(e) => setIngredients(e.target.value)} placeholder="今ある材料（例：鶏むね、豆腐、トマト）任意" style={inputStyle} />
-        <PrimaryBtn onClick={getSuggestion} disabled={sugLoading} style={{ marginTop: 10 }}>{sugLoading ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Sparkles size={16} />} 提案する</PrimaryBtn>
+        <div style={{ fontSize: 12.5, color: C.inkSoft, margin: "8px 0 10px" }}>今日の記録と被らないよう、残りの枠・体質・いつもの傾向をふまえて提案します。</div>
+        <div style={{ marginBottom: 10 }}>
+          <Segmented value={mode} onChange={(v) => { setMode(v); setOptions(null); setRecipes({}); }} options={[{ v: "cook", l: "自炊" }, { v: "eatout", l: "外食・デリバリー" }]} />
+        </div>
+        {mode === "cook" && <input value={ingredients} onChange={(e) => setIngredients(e.target.value)} placeholder="今ある材料（例：鶏むね、豆腐、トマト）任意" style={inputStyle} />}
+        <PrimaryBtn onClick={() => runSuggest(false)} disabled={sugLoading} style={{ marginTop: 10 }}>{sugLoading ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Sparkles size={16} />} 提案する</PrimaryBtn>
         {options && options.length > 0 && (
-          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-            {options.map((o, i) => (
-              <div key={i} style={{ border: `1px solid ${C.line}`, borderRadius: 12, padding: 12, background: C.surfaceAlt }}>
-                <div style={{ fontWeight: 700, fontSize: 14 }}>{o.name}</div>
-                <div style={{ fontSize: 11.5, color: C.inkSoft, marginTop: 3 }}>{o.kcal}kcal · P{o.p} F{o.f} C{o.c}{o.note ? ` · ${o.note}` : ""}</div>
-                {!recipes[i] && <GhostBtn onClick={() => openRecipe(i, o.name)} disabled={recipeLoading === i} style={{ marginTop: 10 }}>{recipeLoading === i ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <ChefHat size={15} />} これで作る（レシピを見る）</GhostBtn>}
-                {recipes[i] && !recipes[i].error && <RecipeView r={recipes[i]} added={addedIdx === i} onLog={() => logRecipe(i, recipes[i])} />}
-                {recipes[i] && recipes[i].error && <div style={{ fontSize: 12, color: C.protein, marginTop: 8 }}>レシピを取得できませんでした。もう一度お試しください。</div>}
-              </div>
-            ))}
-          </div>
+          <>
+            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+              {options.map((o, i) => (
+                <div key={i} style={{ border: `1px solid ${C.line}`, borderRadius: 12, padding: 12, background: C.surfaceAlt }}>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{o.name}</div>
+                  <div style={{ fontSize: 11.5, color: C.inkSoft, marginTop: 3 }}>{o.kcal}kcal · P{o.p} F{o.f} C{o.c}{o.note ? ` · ${o.note}` : ""}</div>
+                  {!recipes[i] && <GhostBtn onClick={() => openRecipe(i, o.name)} disabled={recipeLoading === i} style={{ marginTop: 10 }}>{recipeLoading === i ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <ChefHat size={15} />} {mode === "eatout" ? "頼み方を見る" : "これで作る（レシピを見る）"}</GhostBtn>}
+                  {recipes[i] && !recipes[i].error && <RecipeView r={recipes[i]} mode={recipes[i]._mode} added={addedIdx === i} onLog={() => logRecipe(i, recipes[i])} />}
+                  {recipes[i] && recipes[i].error && <div style={{ fontSize: 12, color: C.protein, marginTop: 8 }}>取得できませんでした。もう一度お試しください。</div>}
+                </div>
+              ))}
+            </div>
+            <GhostBtn onClick={() => runSuggest(true)} disabled={sugLoading} style={{ marginTop: 10 }}>{sugLoading ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <Sparkles size={14} />} 別の案を出す</GhostBtn>
+          </>
         )}
         {options && options.length === 0 && <div style={{ fontSize: 12.5, color: C.inkSoft, marginTop: 10 }}>提案を取得できませんでした。もう一度お試しください。</div>}
       </Card>
