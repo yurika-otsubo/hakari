@@ -176,16 +176,22 @@ async function companionPoint(ctx) {
   return (await callClaude(sys, u)).trim();
 }
 async function suggestMeal(ctx) {
-  const sys = "あなたはダイエットの伴走アシスタント。残りのカロリー・PFC・体質・好み・今ある材料を踏まえ、次の食事メニュー候補を1〜2案出す。励ましや前置きの一言は不要。出力はJSONのみ、コードフェンス禁止。各案に name(メニュー名), kcal, p, f, c, note(30字以内の一言) を入れる。脂質や吸収への配慮など体質メモがあれば反映。" +
+  const hasIng = ctx.ingredients && ctx.ingredients.trim();
+  const sys = "あなたはダイエットの伴走アシスタント。残りのカロリー・PFC・体質・好み・今ある材料を踏まえ、次の食事メニュー候補を1〜2案出す。" +
+    (hasIng ? "【最重要】『今ある材料』が入力されている場合は、その材料を主役にしたメニューにすること。原則その材料を使い、入力に無い食材は最小限の補助（調味料・基本食材）に留める。『好み』はあくまで味付けや方向性の参考で、好みに書かれた食材を勝手に主役にしない。" : "") +
+    "励ましや前置きの一言は不要。出力はJSONのみ、コードフェンス禁止。各案に name(メニュー名), kcal, p, f, c, note(30字以内の一言) を入れる。脂質や吸収への配慮など体質メモがあれば反映。" +
     'スキーマ:{"options":[{"name":string,"kcal":number,"p":number,"f":number,"c":number,"note":string}]}';
-  const u = `残り${ctx.targetKcal - ctx.eatenKcal}kcal。残りP${ctx.pG - ctx.p}g/F${ctx.fG - ctx.f}g/C${ctx.cG - ctx.c}g。体質メモ:${ctx.constitution || "なし"}。好み:${ctx.prefs || "なし"}。今ある材料:${ctx.ingredients || "未入力"}。`;
+  const u = `残り${ctx.targetKcal - ctx.eatenKcal}kcal。残りP${ctx.pG - ctx.p}g/F${ctx.fG - ctx.f}g/C${ctx.cG - ctx.c}g。体質メモ:${ctx.constitution || "なし"}。今ある材料(最優先):${ctx.ingredients || "未入力"}。好み(味付けの参考程度):${ctx.prefs || "なし"}。`;
   const r = parseJSON(await callClaude(sys, u));
   return r.options || [];
 }
 async function getRecipe(ctx, mealName) {
-  const sys = "選ばれたメニューの具体的なレシピを作る。具材は分量を必ずg（または個数＋g目安）まで明記し、何も考えず作れるようにする。ユーザーは食べ過ぎてカロリーオーバーしがちなので、1人前の分量を守れる現実的な量にし、作りすぎない分量にする。手順は簡潔な箇条書き。kcalとPFCはそのレシピ1人前の値。出力はJSONのみ、コードフェンス禁止。" +
+  const hasIng = ctx.ingredients && ctx.ingredients.trim();
+  const sys = "選ばれたメニューの具体的なレシピを作る。" +
+    (hasIng ? "【最重要】『今ある材料』が入力されているので、その材料を主役にしたレシピにすること。入力に無い食材は調味料や基本食材などの最小限に留め、好みに書かれた食材を主役に持ち込まない。" : "") +
+    "具材は分量を必ずg（または個数＋g目安）まで明記し、何も考えず作れるようにする。ユーザーは食べ過ぎてカロリーオーバーしがちなので、1人前の分量を守れる現実的な量にし、作りすぎない分量にする。手順は簡潔な箇条書き。kcalとPFCはそのレシピ1人前の値。出力はJSONのみ、コードフェンス禁止。" +
     'スキーマ:{"title":string,"servings":number,"ingredients":[{"item":string,"amount":string}],"steps":[string],"kcal":number,"p":number,"f":number,"c":number,"tip":string}';
-  const u = `メニュー:${mealName}。1人前が残り${ctx.targetKcal - ctx.eatenKcal}kcal以内に収まるのが目安。体質メモ:${ctx.constitution || "なし"}。好み:${ctx.prefs || "なし"}。今ある材料:${ctx.ingredients || "未入力"}。`;
+  const u = `メニュー:${mealName}。1人前が残り${ctx.targetKcal - ctx.eatenKcal}kcal以内に収まるのが目安。今ある材料(最優先で使う):${ctx.ingredients || "未入力"}。好み(味付けの参考程度):${ctx.prefs || "なし"}。体質メモ:${ctx.constitution || "なし"}。`;
   return parseJSON(await callClaude(sys, u, 1500));
 }
 async function chatReply(profile, targets, history) {
@@ -471,15 +477,14 @@ function App() {
   if (!dataLoaded) return <Splash text="データを読み込んでいます…" />;
 
   return (
-    <div style={{ fontFamily: FONT_BODY, background: C.canvas, color: C.ink, maxWidth: 460, margin: "0 auto", minHeight: "100vh", position: "relative" }}>
-      <div style={{ padding: "20px 20px 8px", display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+    <div style={{ fontFamily: FONT_BODY, background: C.canvas, color: C.ink, maxWidth: 460, margin: "0 auto", height: "100dvh", display: "flex", flexDirection: "column" }}>
+      <div style={{ flexShrink: 0, padding: "20px 20px 8px", display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
         <div style={{ fontFamily: FONT_DISP, fontSize: 22, letterSpacing: 3 }}>{APP_NAME}</div>
         <div style={{ fontSize: 12, color: C.inkSoft }}>{new Date().getMonth() + 1}月{new Date().getDate()}日</div>
       </div>
 
-      {syncErr && <div style={{ margin: "0 16px 8px", fontSize: 11.5, color: C.protein, background: "#FBEDE7", border: `1px solid ${C.line}`, borderRadius: 10, padding: "8px 12px" }}>{syncErr}</div>}
-
-      <div style={{ padding: "0 16px 120px", animation: "fade .3s ease" }}>
+      <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch", padding: "0 16px 24px", animation: "fade .3s ease" }}>
+        {syncErr && <div style={{ marginBottom: 8, fontSize: 11.5, color: C.protein, background: "#FBEDE7", border: `1px solid ${C.line}`, borderRadius: 10, padding: "8px 12px" }}>{syncErr}</div>}
         {!onboarded && screen !== "settings" && (
           <Card style={{ background: C.mossSoft, borderColor: C.moss, marginBottom: 14 }}>
             <div style={{ fontWeight: 700, marginBottom: 4 }}>はじめに、からだの情報を</div>
@@ -494,7 +499,7 @@ function App() {
         {screen === "settings" && <SettingsScreen profile={profile} setProfile={setProfile} targets={targets} email={session.user.email} onDone={() => { setOnboarded(true); setScreen("home"); }} onSignOut={signOutUser} />}
       </div>
 
-      <div style={{ position: "sticky", bottom: 0, maxWidth: 460, margin: "0 auto", background: "rgba(251,250,246,.94)", backdropFilter: "blur(8px)", borderTop: `1px solid ${C.line}`, display: "flex", padding: "8px 4px calc(14px + env(safe-area-inset-bottom))" }}>
+      <div style={{ flexShrink: 0, background: "rgba(251,250,246,.94)", backdropFilter: "blur(8px)", borderTop: `1px solid ${C.line}`, display: "flex", padding: "8px 4px calc(10px + env(safe-area-inset-bottom))" }}>
         {[{ id: "home", label: "ホーム", icon: Home }, { id: "record", label: "記録", icon: NotebookPen }, { id: "body", label: "からだ", icon: Activity }, { id: "chat", label: "相談", icon: MessageCircle }, { id: "settings", label: "設定", icon: SettingsIcon }].map((t) => {
           const on = screen === t.id, I = t.icon;
           return <button key={t.id} onClick={() => setScreen(t.id)} style={{ flex: 1, border: "none", background: "transparent", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, color: on ? C.moss : C.inkFaint, padding: "4px 0" }}><I size={20} strokeWidth={on ? 2.4 : 1.8} /><span style={{ fontSize: 10, fontWeight: on ? 700 : 500 }}>{t.label}</span></button>;
@@ -792,7 +797,7 @@ function ChatScreen({ profile, targets, chatLog, setChatLog }) {
         {loading && <div style={{ alignSelf: "flex-start", color: C.inkFaint, fontSize: 13, display: "inline-flex", gap: 6, alignItems: "center", padding: "4px 6px" }}><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> 考えています…</div>}
         <div ref={endRef} />
       </div>
-      <div style={{ position: "sticky", bottom: 78, display: "flex", gap: 8, alignItems: "flex-end" }}>
+      <div style={{ position: "sticky", bottom: 0, display: "flex", gap: 8, alignItems: "flex-end", background: C.canvas, paddingTop: 8 }}>
         <textarea value={input} onChange={(e) => setInput(e.target.value)} rows={1} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder="メッセージを入力" style={{ ...inputStyle, resize: "none", minHeight: 44 }} />
         <button onClick={() => send()} disabled={loading || !input.trim()} style={{ flexShrink: 0, width: 46, height: 46, borderRadius: 14, border: "none", background: (loading || !input.trim()) ? C.inkFaint : C.moss, color: "#fff", cursor: "pointer", display: "grid", placeItems: "center" }}><Send size={18} /></button>
       </div>
