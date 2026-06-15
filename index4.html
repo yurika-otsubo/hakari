@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+<title>はかり</title>
+<meta name="theme-color" content="#EAE7DF" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="はかり" />
+<style>
+  html,body{margin:0;padding:0;background:#EAE7DF;-webkit-text-size-adjust:100%;}
+  #root{min-height:100vh;}
+  *{-webkit-tap-highlight-color:transparent;}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  button:focus-visible{outline:2px solid #5C6650;outline-offset:2px;}
+  input:focus,select:focus,textarea:focus{outline:2px solid #5C6650;outline-offset:0;}
+  ::placeholder{color:#A8A192;}
+  a{color:#5C6650;}
+</style>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useMemo } = React;
+
+/* ===== brand / model ===== */
+const APP_NAME = "はかり";
+const MODEL = "claude-sonnet-4-6"; // コスト重視なら "claude-haiku-4-5" に変更可
+const API_URL = "https://api.anthropic.com/v1/messages";
+
+/* ===== palette ===== */
+const C = {
+  canvas: "#EAE7DF", surface: "#FBFAF6", surfaceAlt: "#F3F1E9",
+  ink: "#2A271F", inkSoft: "#736C5D", inkFaint: "#A8A192", line: "#DAD5C8",
+  moss: "#5C6650", mossSoft: "#E7EAE0",
+  protein: "#B25E3C", fat: "#C39A3E", carb: "#4E7C7A",
+};
+const FONT_BODY = `"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif`;
+const FONT_DISP = `"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif`;
+
+/* ===== icons (inline svg) ===== */
+const ICONS = {
+  home: ["M3 10.5 12 3l9 7.5", "M5 9.5V21h14V9.5"],
+  record: ["M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z", "M14 5l3 3"],
+  activity: ["M22 12h-4l-3 8L9 4l-3 8H2"],
+  settings: ["M5 21v-6", "M5 11V3", "M12 21v-9", "M12 7V3", "M19 21v-4", "M19 13V3", "M3 15h4", "M10 7h4", "M17 17h4"],
+  chat: ["M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z"],
+  plus: ["M12 5v14", "M5 12h14"],
+  check: ["M20 6 9 17l-5-5"],
+  trash: ["M3 6h18", "M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2", "M6 6l1 14a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-14", "M10 11v6", "M14 11v6"],
+  star: ["M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 17l-5.2 2.6 1-5.8L3.5 9.7l5.9-.9z"],
+  send: ["M22 2 11 13", "M22 2 15 22l-4-9-9-4z"],
+  sparkles: ["M12 4l1.7 4.3L18 10l-4.3 1.7L12 16l-1.7-4.3L6 10l4.3-1.7z", "M18 4v3", "M19.5 5.5h-3"],
+  x: ["M18 6 6 18", "M6 6l12 12"],
+  chef: ["M7 19h10", "M8 19v-3", "M16 19v-3", "M8 16c-2.5 0-4-1.8-4-4 0-2.2 1.8-3.7 3.7-3.5C8.1 6.5 9.9 5 12 5s3.9 1.5 4.3 3.5C18.2 8.3 20 9.8 20 12c0 2.2-1.5 4-4 4z"],
+  pencil: ["M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z", "M14 5l3 3"],
+  loader: ["M12 3a9 9 0 1 0 9 9"],
+};
+function Icon({ name, size = 18, strokeWidth = 1.8, color = "currentColor", style }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" style={style}>
+      {(ICONS[name] || []).map((d, i) => <path key={i} d={d} />)}
+    </svg>
+  );
+}
+const Home = (p) => <Icon name="home" {...p} />;
+const NotebookPen = (p) => <Icon name="record" {...p} />;
+const Activity = (p) => <Icon name="activity" {...p} />;
+const SettingsIcon = (p) => <Icon name="settings" {...p} />;
+const MessageCircle = (p) => <Icon name="chat" {...p} />;
+const Plus = (p) => <Icon name="plus" {...p} />;
+const Check = (p) => <Icon name="check" {...p} />;
+const Trash2 = (p) => <Icon name="trash" {...p} />;
+const Star = (p) => <Icon name="star" {...p} />;
+const Send = (p) => <Icon name="send" {...p} />;
+const Sparkles = (p) => <Icon name="sparkles" {...p} />;
+const X = (p) => <Icon name="x" {...p} />;
+const ChefHat = (p) => <Icon name="chef" {...p} />;
+const Pencil = (p) => <Icon name="pencil" {...p} />;
+const Loader2 = (p) => <Icon name="loader" {...p} />;
+
+/* ===== constants ===== */
+const ACTIVITIES = [
+  { id: "low", label: "座位中心", factor: 1.2, note: "デスクワーク中心" },
+  { id: "light", label: "軽い運動", factor: 1.375, note: "週1〜3回" },
+  { id: "mid", label: "中程度", factor: 1.55, note: "週3〜5回" },
+  { id: "high", label: "活発", factor: 1.725, note: "ほぼ毎日" },
+];
+const FAT_LEVERS = { standard: { pct: 25, label: "標準" }, light: { pct: 22, label: "やや制限" }, restrict: { pct: 20, label: "制限" } };
+const PRO_LEVERS = { standard: { pct: 15, label: "標準" }, light: { pct: 20, label: "やや増" }, increase: { pct: 25, label: "増" } };
+const TONES = { warm: { label: "寄り添い" }, plain: { label: "事務的" } };
+
+const todayKey = () => new Date().toISOString().slice(0, 10);
+const nowHHMM = () => new Date().toTimeString().slice(0, 5);
+const fmtDate = (k) => { const d = new Date(k + "T00:00:00"); return `${d.getMonth() + 1}/${d.getDate()}`; };
+
+/* ===== compute ===== */
+function computeTargets(p) {
+  const w = +p.weight || 0, h = +p.height || 0, age = +p.age || 0;
+  const bmrBase = 10 * w + 6.25 * h - 5 * age;
+  const bmr = Math.round(p.sex === "male" ? bmrBase + 5 : bmrBase - 161);
+  const act = ACTIVITIES.find((a) => a.id === p.activity) || ACTIVITIES[0];
+  const tdee = Math.round(bmr * act.factor);
+  let deficit = 0; if (p.goal === "lose") deficit = p.pace === "slow" ? 275 : 550;
+  const targetKcal = Math.max(tdee - deficit, bmr);
+  const floored = targetKcal === bmr && deficit > 0;
+  const fPct = FAT_LEVERS[p.fatLever].pct, pPct = PRO_LEVERS[p.proteinLever].pct, cPct = 100 - fPct - pPct;
+  const pG = Math.round((targetKcal * pPct) / 100 / 4), fG = Math.round((targetKcal * fPct) / 100 / 9), cG = Math.round((targetKcal * cPct) / 100 / 4);
+  return { bmr, tdee, targetKcal, floored, pPct, fPct, cPct, pG, fG, cG };
+}
+const sumLog = (rows) => rows.reduce((a, r) => ({ kcal: a.kcal + (+r.kcal || 0), p: a.p + (+r.p || 0), f: a.f + (+r.f || 0), c: a.c + (+r.c || 0) }), { kcal: 0, p: 0, f: 0, c: 0 });
+function actualRatio(s) {
+  const pc = s.p * 4, fc = s.f * 9, cc = s.c * 4, tot = pc + fc + cc;
+  if (tot <= 0) return null;
+  const p = Math.round((pc / tot) * 100), f = Math.round((fc / tot) * 100);
+  return { p, f, c: 100 - p - f };
+}
+
+/* ===== api key ===== */
+const KEY_API = "hakari:apikey";
+let API_KEY = "";
+try { API_KEY = localStorage.getItem(KEY_API) || ""; } catch {}
+function setApiKey(k) { API_KEY = k || ""; try { localStorage.setItem(KEY_API, API_KEY); } catch {} }
+
+/* ===== AI ===== */
+function aiHeaders() {
+  return {
+    "Content-Type": "application/json",
+    "x-api-key": API_KEY,
+    "anthropic-version": "2023-06-01",
+    "anthropic-dangerous-direct-browser-access": "true",
+  };
+}
+async function callClaude(system, user, maxTokens = 1024) {
+  if (!API_KEY) throw new Error("NO_KEY");
+  const res = await fetch(API_URL, { method: "POST", headers: aiHeaders(), body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] }) });
+  if (!res.ok) throw new Error("API " + res.status);
+  const data = await res.json();
+  return data.content.filter((b) => b.type === "text").map((b) => b.text).join("\n");
+}
+async function callClaudeChat(system, messages, maxTokens = 1024) {
+  if (!API_KEY) throw new Error("NO_KEY");
+  const res = await fetch(API_URL, { method: "POST", headers: aiHeaders(), body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system, messages }) });
+  if (!res.ok) throw new Error("API " + res.status);
+  const data = await res.json();
+  return data.content.filter((b) => b.type === "text").map((b) => b.text).join("\n");
+}
+function parseJSON(text) {
+  const clean = text.replace(/```json|```/g, "").trim();
+  const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
+  return JSON.parse(clean.slice(s, e + 1));
+}
+const toneNoteOf = (t) => t === "warm" ? "やわらかく寄り添う口調。ですます調。" : "事務的で簡潔な口調。ですます調は保つ。絵文字なし。";
+const callNameNote = (n) => n ? `ユーザーの呼び方は「${n}」。ユーザーを指すときはこの呼称を使う。` : "ユーザーへの特定の呼称は使わず、自然な文にする。";
+
+async function estimateFood(text) {
+  const sys = "あなたは日本語の栄養推定アシスタント。ユーザーが食べたものの説明から推定する。入力に複数の食事や時刻(例 9:00、12:30 など)が含まれる場合は、食事ごと・時刻ごとに分割して entries 配列にする。時刻が書かれていれば time に HH:MM 形式で入れ、書かれていなければ time は空文字。各 entry に kcal,p(たんぱく質g),f(脂質g),c(炭水化物g) を入れる。量が不明なら一般的な1人前を仮定し、noteに仮定内容を簡潔に書く。出力はJSONのみ。前置き・説明・マークダウン・コードフェンス禁止。" +
+    'スキーマ:{"entries":[{"time":string,"name":string,"kcal":number,"p":number,"f":number,"c":number}],"confidence":"high"|"medium"|"low","note":string}';
+  return parseJSON(await callClaude(sys, text));
+}
+async function proposeLevers(text) {
+  const sys = "検査結果や体質メモのテキストから、ダイエットアプリのPFC配分レバーの調整案を出す。これは医学的診断ではなく一般的な栄養配分の提案。出力はJSONのみ、コードフェンス禁止。" +
+    'fatLeverは"standard"|"light"|"restrict"、proteinLeverは"standard"|"light"|"increase"。スキーマ:{"fatLever":string,"proteinLever":string,"rationale":string(日本語,90字以内)}';
+  return parseJSON(await callClaude(sys, text));
+}
+async function companionPoint(ctx) {
+  const sys = "あなたはダイエットの伴走アシスタント。今日の数値から、実用的な一言ポイント（気づきや次の一手）を1文で返す。励ましやねぎらい（『よく頑張りましたね』『無理せず続けましょう』等）は不要。事実にもとづく具体的な内容にする。" + toneNoteOf(ctx.tone) + callNameNote(ctx.callName) + "医学的断定はしない。出力はポイント本文のみ。";
+  const u = `目標カロリー${ctx.targetKcal}/摂取${ctx.eatenKcal}/残り${ctx.targetKcal - ctx.eatenKcal}kcal。たんぱく質 残り${ctx.pG - ctx.p}g、脂質 残り${ctx.fG - ctx.f}g、炭水化物 残り${ctx.cG - ctx.c}g。体質メモ:${ctx.constitution || "なし"}。`;
+  return (await callClaude(sys, u)).trim();
+}
+function recentSummary(foodLog, today) {
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 21);
+  const cut = cutoff.toISOString().slice(0, 10);
+  const buckets = { 朝: {}, 昼: {}, 夜: {} };
+  foodLog.forEach((r) => {
+    if (r.date === today || r.date < cut) return;
+    const h = parseInt((r.time || "12:00").slice(0, 2), 10);
+    const b = h < 11 ? "朝" : h < 16 ? "昼" : "夜";
+    const name = (r.text || "").trim(); if (!name) return;
+    buckets[b][name] = (buckets[b][name] || 0) + 1;
+  });
+  const top = (o) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([n, c]) => `${n}×${c}`).join("、");
+  const parts = [];
+  ["朝", "昼", "夜"].forEach((b) => { const t = top(buckets[b]); if (t) parts.push(`${b}: ${t}`); });
+  return parts.join(" / ");
+}
+async function suggestMeal(ctx) {
+  const over = ctx.eatenKcal > ctx.targetKcal;
+  const remain = ctx.targetKcal - ctx.eatenKcal;
+  const hasIng = ctx.mode === "cook" && ctx.ingredients && ctx.ingredients.trim();
+  const common =
+    "あなたはダイエットの伴走アシスタント。次の食事の候補を1〜2案出す。守ること：" +
+    "(1) 一食として成立する常識的な組み合わせにする（主菜・副菜・必要なら主食。甘い物と味噌汁のようなちぐはぐな同梱はしない）。" +
+    "(2) 『今日すでに食べたもの』と主食・主材料を被らせない。" +
+    "(3) 『普段の傾向』には自然に沿う（よく食べる系統や食材を尊重）。ただし(2)を優先。" +
+    "(4) 残りのPFCに沿う（炭水化物が多い日は主食控えめでたんぱく質寄り等）。" +
+    "(5) 好みは方向性の参考。好みの食材を毎回主役にしない。" +
+    (over ? "(6) 【重要】今日はすでにカロリー超過。重い一食を勧めず、汁物・サラダ・たんぱく質少量など軽いものや『次の食事で調整』の方向で、無理のない控えめな提案にする。" : "") +
+    (ctx.avoidNames && ctx.avoidNames.length ? `(7) 次の案は出さず別案にする：${ctx.avoidNames.join("、")}。` : "") +
+    "励ましや前置きは不要。出力はJSONのみ、コードフェンス禁止。各案に name, kcal, p, f, c, note(30字以内) を入れる。";
+  const cookSys = common + (hasIng ? "今ある材料が入力されているので、それを主役にした自炊メニューにする。入力に無い食材は最小限の補助に留める。" : "自炊で作れるメニューにする。");
+  const eatoutSys = common + "これは外食・デリバリー(Uber等)向け。具材レシピではなく『どの店種・料理ジャンルで、何を、どう頼むか(ごはん少なめ等の調整を含む)』を提案する。実在店舗名やメニューは断定せず一般的な選び方にする。name は料理や頼み方、note に選び方のコツ。";
+  const sys = (ctx.mode === "eatout" ? eatoutSys : cookSys) +
+    'スキーマ:{"options":[{"name":string,"kcal":number,"p":number,"f":number,"c":number,"note":string}]}';
+  const u =
+    `残り${remain}kcal（${over ? "超過中" : "以内が目安"}）。残りP${ctx.pG - ctx.p}g/F${ctx.fG - ctx.f}g/C${ctx.cG - ctx.c}g。` +
+    `今日すでに食べたもの:${(ctx.todayItems && ctx.todayItems.length) ? ctx.todayItems.join("、") : "なし"}。` +
+    `普段の傾向:${ctx.historySummary || "まだデータが少ない"}。体質メモ:${ctx.constitution || "なし"}。好み:${ctx.prefs || "なし"}。` +
+    (ctx.mode === "cook" ? `今ある材料(最優先):${ctx.ingredients || "未入力"}。` : "");
+  const r = parseJSON(await callClaude(sys, u));
+  return r.options || [];
+}
+async function getRecipe(ctx, mealName, mode) {
+  const hasIng = mode === "cook" && ctx.ingredients && ctx.ingredients.trim();
+  const cookSys = "選ばれたメニューの具体的なレシピを作る。" +
+    (hasIng ? "【最重要】今ある材料を主役にし、入力に無い食材は調味料や基本食材などの最小限に留める。" : "") +
+    "具材は分量を必ずg(または個数＋g目安)まで明記し、何も考えず作れるようにする。ユーザーは食べ過ぎがちなので1人前の分量を守れる現実的な量にする。手順は簡潔な箇条書き。" +
+    'ingredients は材料、steps は作り方。出力はJSONのみ、コードフェンス禁止。スキーマ:{"title":string,"servings":number,"ingredients":[{"item":string,"amount":string}],"steps":[string],"kcal":number,"p":number,"f":number,"c":number,"tip":string}';
+  const eatoutSys = "選ばれた外食・デリバリーのメニューについて頼み方ガイドを作る。" +
+    "ingredients には『注文する品と量の目安』(例 item:焼き魚定食, amount:ごはん少なめ150g)、steps には『店での選び方・頼み方・避けるポイント』を箇条書きで。実在店舗名やメニューは断定しない。kcal/PFCは目安。servings は1。" +
+    '出力はJSONのみ、コードフェンス禁止。スキーマ:{"title":string,"servings":number,"ingredients":[{"item":string,"amount":string}],"steps":[string],"kcal":number,"p":number,"f":number,"c":number,"tip":string}';
+  const u = `メニュー:${mealName}。1人前が残り${ctx.targetKcal - ctx.eatenKcal}kcal以内が目安。` +
+    (mode === "cook" ? `今ある材料(最優先で使う):${ctx.ingredients || "未入力"}。` : "") +
+    `好み(参考程度):${ctx.prefs || "なし"}。体質メモ:${ctx.constitution || "なし"}。`;
+  return parseJSON(await callClaude(mode === "eatout" ? eatoutSys : cookSys, u, 1500));
+}
+async function chatReply(profile, targets, history) {
+  const sys = `あなたは「${APP_NAME}」というダイエット伴走アプリの相談相手。一般的なダイエット・栄養・運動・習慣・モチベーションの相談に、わかりやすく現実的に答える。` + toneNoteOf(profile.tone) + callNameNote(profile.callName) + "健康的で持続可能な方法を重視し、極端な制限や急激な減量はすすめない。サプリや特定商品は効果を断定保証せず、一般的な情報と『専門家に相談を』の姿勢で答える。病気・症状・検査数値の解釈など医学的判断が必要な話題は、医師・管理栄養士など専門家への相談をやさしくすすめる。ユーザーが心身の不調や極端な制限に向かう様子があれば、無理を勧めず気づかう。回答は簡潔に。" + `参考(ユーザー設定): 目標${targets.targetKcal}kcal/PFC ${targets.pPct}:${targets.fPct}:${targets.cPct}。体質メモ:${profile.constitution || "なし"}。好み:${profile.prefs || "なし"}。`;
+  return (await callClaudeChat(sys, history.map((m) => ({ role: m.role, content: m.content })))).trim();
+}
+
+/* ===== supabase (cloud + auth) ===== */
+const SB_URL = "https://wwzlptnuiedsiwrltoxf.supabase.co";
+const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind3emxwdG51aWVkc2l3cmx0b3hmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1MDc4MzIsImV4cCI6MjA5NzA4MzgzMn0.U21uYswBbchGZJLhbW50W-2-DtEE5MgNQ62ThchmTKg";
+const sb = window.supabase.createClient(SB_URL, SB_KEY);
+
+async function signInGoogle() { await sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } }); }
+async function signOutUser() { await sb.auth.signOut(); }
+async function cloudLoad(userId) {
+  const { data, error } = await sb.from("app_data").select("data").eq("user_id", userId).maybeSingle();
+  if (error) throw error;
+  return data ? data.data : null;
+}
+async function cloudSave(userId, dataObj) {
+  const { error } = await sb.from("app_data").upsert({ user_id: userId, data: dataObj, updated_at: new Date().toISOString() });
+  if (error) throw error;
+}
+
+const DEFAULT_PROFILE = {
+  age: 30, sex: "female", height: 160, weight: 55,
+  activity: "light", goal: "lose", pace: "standard",
+  fatLever: "restrict", proteinLever: "increase",
+  tone: "warm", callName: "",
+  constitution: "軽度の脂質分解異常・タンパク質吸収異常（唾液検査）。脂質を抑えると調子が良い。",
+  prefs: "",
+};
+
+/* ===== atoms ===== */
+function Card({ children, style, ...rest }) {
+  return <div {...rest} style={{ background: C.surface, border: `1px solid ${C.line}`, borderRadius: 18, padding: 18, ...style }}>{children}</div>;
+}
+function Eyebrow({ children }) {
+  return <div style={{ fontSize: 11, letterSpacing: 2, color: C.inkFaint, fontWeight: 700, textTransform: "uppercase" }}>{children}</div>;
+}
+const inputStyle = { width: "100%", boxSizing: "border-box", border: `1px solid ${C.line}`, borderRadius: 12, padding: "11px 13px", fontSize: 16, fontFamily: FONT_BODY, background: C.surface, color: C.ink };
+
+function PrimaryBtn({ children, onClick, disabled, style }) {
+  return <button onClick={onClick} disabled={disabled} style={{ background: disabled ? C.inkFaint : C.moss, color: "#fff", border: "none", borderRadius: 12, padding: "12px 16px", fontWeight: 700, fontSize: 14, cursor: disabled ? "default" : "pointer", width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: FONT_BODY, ...style }}>{children}</button>;
+}
+function GhostBtn({ children, onClick, disabled, style }) {
+  return <button onClick={onClick} disabled={disabled} style={{ background: "transparent", color: C.ink, border: `1px solid ${C.line}`, borderRadius: 12, padding: "10px 14px", fontWeight: 600, fontSize: 13, cursor: disabled ? "default" : "pointer", fontFamily: FONT_BODY, display: "flex", alignItems: "center", gap: 6, justifyContent: "center", width: "100%", ...style }}>{children}</button>;
+}
+
+function CalorieRing({ eaten, target }) {
+  const r = 62, sw = 11, cir = 2 * Math.PI * r;
+  const pct = target ? Math.min(eaten / target, 1) : 0, over = eaten > target, remain = target - eaten;
+  return (
+    <div style={{ position: "relative", width: 160, height: 160 }}>
+      <svg width="160" height="160" style={{ transform: "rotate(-90deg)" }}>
+        <circle cx="80" cy="80" r={r} fill="none" stroke={C.surfaceAlt} strokeWidth={sw} />
+        <circle cx="80" cy="80" r={r} fill="none" stroke={over ? C.protein : C.moss} strokeWidth={sw} strokeLinecap="round" strokeDasharray={cir} strokeDashoffset={cir * (1 - pct)} style={{ transition: "stroke-dashoffset .6s ease" }} />
+      </svg>
+      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ fontFamily: FONT_DISP, fontSize: 34, lineHeight: 1, color: over ? C.protein : C.ink }}>{Math.abs(Math.round(remain))}</div>
+        <div style={{ fontSize: 11, color: C.inkSoft, marginTop: 4 }}>{over ? "kcal オーバー" : "kcal のこり"}</div>
+      </div>
+    </div>
+  );
+}
+function PFCColumns({ s, t }) {
+  const cols = [
+    { k: "p", label: "P", name: "たんぱく質", col: C.protein, val: s.p, tgt: t.pG },
+    { k: "f", label: "F", name: "脂質", col: C.fat, val: s.f, tgt: t.fG },
+    { k: "c", label: "C", name: "炭水化物", col: C.carb, val: s.c, tgt: t.cG },
+  ];
+  return (
+    <div style={{ display: "flex", gap: 14, justifyContent: "space-between" }}>
+      {cols.map((c) => {
+        const pct = c.tgt ? Math.min(c.val / c.tgt, 1) : 0, over = c.val > c.tgt;
+        return (
+          <div key={c.k} style={{ flex: 1, textAlign: "center" }}>
+            <div style={{ position: "relative", height: 96, borderRadius: 10, background: C.surfaceAlt, overflow: "hidden", border: `1px solid ${C.line}` }}>
+              <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: `${pct * 100}%`, background: c.col, opacity: over ? 0.55 : 0.9, transition: "height .6s ease" }} />
+              <div style={{ position: "absolute", left: 6, top: 6, fontFamily: FONT_DISP, fontSize: 16, color: over ? C.protein : c.col, fontWeight: 700 }}>{c.label}</div>
+            </div>
+            <div style={{ marginTop: 6, fontSize: 12, color: C.ink, fontWeight: 600 }}>{Math.round(c.val)}<span style={{ color: C.inkFaint }}> / {c.tgt}g</span></div>
+            <div style={{ fontSize: 10, color: C.inkFaint }}>{c.name}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+function RatioBars({ target, actual }) {
+  const Row = ({ label, r, muted }) => (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.inkSoft, marginBottom: 4 }}>
+        <span>{label}</span>{r ? <span>P{r.p} : F{r.f} : C{r.c}</span> : <span style={{ color: C.inkFaint }}>記録待ち</span>}
+      </div>
+      <div style={{ display: "flex", height: 16, borderRadius: 6, overflow: "hidden", background: C.surfaceAlt, border: `1px solid ${C.line}` }}>
+        {r ? (<><div style={{ width: `${r.p}%`, background: C.protein, opacity: muted ? 0.45 : 1 }} /><div style={{ width: `${r.f}%`, background: C.fat, opacity: muted ? 0.45 : 1 }} /><div style={{ width: `${r.c}%`, background: C.carb, opacity: muted ? 0.45 : 1 }} /></>) : null}
+      </div>
+    </div>
+  );
+  return (
+    <div>
+      <Row label="理想の比率" r={target} muted /><Row label="今日の比率" r={actual} />
+      <div style={{ display: "flex", gap: 14, justifyContent: "center", fontSize: 10.5, color: C.inkSoft, marginTop: 6 }}>
+        {[["P たんぱく質", C.protein], ["F 脂質", C.fat], ["C 炭水化物", C.carb]].map(([l, col]) => (
+          <span key={l} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: col }} />{l}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+function MiniLineChart({ data }) {
+  const W = 340, H = 210, padL = 30, padR = 26, padT = 14, padB = 24;
+  const plotW = W - padL - padR, plotH = H - padT - padB, n = data.length;
+  const xs = (i) => n <= 1 ? padL + plotW / 2 : padL + (plotW * i) / (n - 1);
+  const ws = data.map((d) => d.weight); const wMin = Math.min(...ws), wMax = Math.max(...ws), wPad = (wMax - wMin) || 1;
+  const wLo = wMin - wPad * 0.2, wHi = wMax + wPad * 0.2;
+  const wy = (v) => padT + plotH * (1 - (v - wLo) / (wHi - wLo));
+  const bf = data.filter((d) => d.bodyFat != null).map((d) => d.bodyFat); const hasBF = bf.length > 0;
+  const bMin = hasBF ? Math.min(...bf) : 0, bMax = hasBF ? Math.max(...bf) : 1, bPad = (bMax - bMin) || 1;
+  const bLo = bMin - bPad * 0.4, bHi = bMax + bPad * 0.4;
+  const by = (v) => padT + plotH * (1 - (v - bLo) / (bHi - bLo));
+  const wPath = data.map((d, i) => `${i === 0 ? "M" : "L"}${xs(i).toFixed(1)} ${wy(d.weight).toFixed(1)}`).join(" ");
+  let bfPath = "", started = false;
+  data.forEach((d, i) => { if (d.bodyFat != null) { bfPath += `${started ? "L" : "M"}${xs(i).toFixed(1)} ${by(d.bodyFat).toFixed(1)} `; started = true; } else started = false; });
+  const ticks = [wLo, (wLo + wHi) / 2, wHi];
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="210" style={{ display: "block" }}>
+      {ticks.map((t, i) => (
+        <g key={i}>
+          <line x1={padL} y1={wy(t)} x2={W - padR} y2={wy(t)} stroke={C.line} strokeDasharray="3 3" />
+          <text x={padL - 4} y={wy(t) + 3} textAnchor="end" fontSize="9" fill={C.inkSoft}>{t.toFixed(1)}</text>
+        </g>
+      ))}
+      {hasBF && <path d={bfPath} fill="none" stroke={C.carb} strokeWidth="2" strokeDasharray="4 3" />}
+      <path d={wPath} fill="none" stroke={C.moss} strokeWidth="2.5" />
+      {data.map((d, i) => <circle key={"w" + i} cx={xs(i)} cy={wy(d.weight)} r="3" fill={C.moss} />)}
+      {data.map((d, i) => d.bodyFat != null ? <circle key={"b" + i} cx={xs(i)} cy={by(d.bodyFat)} r="2.5" fill={C.carb} /> : null)}
+      {data.map((d, i) => (
+        (n <= 6 || i % Math.ceil(n / 6) === 0 || i === n - 1)
+          ? <text key={"x" + i} x={xs(i)} y={H - 8} textAnchor="middle" fontSize="9" fill={C.inkSoft}>{d.label}</text>
+          : null
+      ))}
+    </svg>
+  );
+}
+function RecipeView({ r, added, onLog, mode }) {
+  const eat = mode === "eatout";
+  return (
+    <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.line}` }}>
+      <div style={{ fontFamily: FONT_DISP, fontSize: 15 }}>{r.title}{!eat && r.servings ? `（${r.servings}人前）` : ""}</div>
+      <div style={{ fontSize: 11, color: C.inkSoft, margin: "4px 0 12px" }}>{r.kcal}kcal · P{r.p} F{r.f} C{r.c}{eat ? "（目安）" : ""}</div>
+      <div style={{ fontSize: 11.5, fontWeight: 700, color: C.inkSoft, marginBottom: 4 }}>{eat ? "注文の目安" : "材料"}</div>
+      <div style={{ marginBottom: 12 }}>
+        {(r.ingredients || []).map((ing, j) => (
+          <div key={j} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13, padding: "4px 0", borderBottom: `1px solid ${C.line}` }}>
+            <span>{ing.item}</span><span style={{ color: C.inkSoft, whiteSpace: "nowrap" }}>{ing.amount}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 11.5, fontWeight: 700, color: C.inkSoft, marginBottom: 4 }}>{eat ? "頼み方のコツ" : "作り方"}</div>
+      <ol style={{ margin: "0 0 12px", paddingLeft: 18, fontSize: 13, lineHeight: 1.75 }}>
+        {(r.steps || []).map((s, j) => <li key={j} style={{ marginBottom: 3 }}>{s}</li>)}
+      </ol>
+      {r.tip && <div style={{ fontSize: 12, color: C.inkSoft, background: C.surface, border: `1px solid ${C.line}`, borderRadius: 10, padding: 10, lineHeight: 1.6 }}><b style={{ color: C.moss }}>ヒント</b>　{r.tip}</div>}
+      <PrimaryBtn onClick={onLog} disabled={added} style={{ marginTop: 12 }}>{added ? <><Check size={16} /> 記録に追加しました</> : <><Plus size={16} /> これを今日の記録に追加</>}</PrimaryBtn>
+    </div>
+  );
+}
+function Field({ label, children }) {
+  return <label style={{ display: "block", fontSize: 11, color: C.inkSoft }}><span style={{ display: "block", marginBottom: 5 }}>{label}</span>{children}</label>;
+}
+function Segmented({ value, onChange, options }) {
+  return (
+    <div style={{ display: "flex", background: C.surfaceAlt, borderRadius: 10, padding: 3, border: `1px solid ${C.line}` }}>
+      {options.map((o) => {
+        const on = value === o.v;
+        return <button key={o.v} onClick={() => onChange(o.v)} style={{ flex: 1, border: "none", borderRadius: 8, padding: "8px 4px", fontSize: 13, cursor: "pointer", fontWeight: on ? 700 : 500, fontFamily: FONT_BODY, background: on ? C.surface : "transparent", color: on ? C.ink : C.inkSoft, boxShadow: on ? "0 1px 2px rgba(0,0,0,.06)" : "none" }}>{o.l}</button>;
+      })}
+    </div>
+  );
+}
+function Lever({ label, levers, value, onChange, color }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 12.5, color: C.ink, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: color }} /> {label}</div>
+      <div style={{ display: "flex", gap: 6 }}>
+        {Object.entries(levers).map(([k, v]) => {
+          const on = value === k;
+          return <button key={k} onClick={() => onChange(k)} style={{ flex: 1, border: `1px solid ${on ? color : C.line}`, borderRadius: 10, padding: "9px 4px", fontSize: 12.5, cursor: "pointer", fontFamily: FONT_BODY, background: on ? color : C.surface, color: on ? "#fff" : C.inkSoft, fontWeight: on ? 700 : 500 }}>{v.label}<br /><span style={{ fontSize: 10, opacity: 0.8 }}>{v.pct}%</span></button>;
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ===== splash / login ===== */
+function Splash({ text }) {
+  return (
+    <div style={{ fontFamily: FONT_BODY, background: C.canvas, color: C.inkSoft, minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12 }}>
+      <div style={{ fontFamily: FONT_DISP, fontSize: 26, letterSpacing: 4, color: C.ink }}>{APP_NAME}</div>
+      <div style={{ display: "inline-flex", gap: 8, alignItems: "center", fontSize: 13 }}>
+        <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> {text || "読み込んでいます…"}
+      </div>
+    </div>
+  );
+}
+function LoginGate() {
+  return (
+    <div style={{ fontFamily: FONT_BODY, background: C.canvas, color: C.ink, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ maxWidth: 380, width: "100%" }}>
+        <div style={{ fontFamily: FONT_DISP, fontSize: 32, letterSpacing: 5, textAlign: "center", marginBottom: 8 }}>{APP_NAME}</div>
+        <div style={{ fontSize: 13, color: C.inkSoft, textAlign: "center", marginBottom: 24, lineHeight: 1.8 }}>ログインすると、PC・スマホ・タブレットで記録が同期されます。</div>
+        <Card>
+          <PrimaryBtn onClick={signInGoogle}>Google でログイン</PrimaryBtn>
+          <div style={{ fontSize: 11.5, color: C.inkSoft, marginTop: 14, lineHeight: 1.7 }}>あなたのデータは本人だけが読み書きできます。ログイン後、「設定」でからだの情報とAIのキーを登録できます。</div>
+        </Card>
+        <div style={{ fontSize: 11, color: C.inkFaint, textAlign: "center", lineHeight: 1.6, padding: "12px 8px 0" }}>健康・栄養の最終判断は、検査機関や医師・管理栄養士にご相談ください。</div>
+      </div>
+    </div>
+  );
+}
+
+/* ===== main ===== */
+function App() {
+  const [session, setSession] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [dataLoaded, setDataLoaded] = useState(false);
+  const [syncErr, setSyncErr] = useState("");
+  const [screen, setScreen] = useState("home");
+
+  const [profile, setProfile] = useState(DEFAULT_PROFILE);
+  const [foodLog, setFoodLog] = useState([]);
+  const [favorites, setFavorites] = useState([]);
+  const [bodyLog, setBodyLog] = useState([]);
+  const [chatLog, setChatLog] = useState([]);
+  const [onboarded, setOnboarded] = useState(false);
+  const saveTimer = useRef(null);
+
+  // auth
+  useEffect(() => {
+    sb.auth.getSession().then(({ data }) => { setSession(data.session); setAuthReady(true); });
+    const { data: sub } = sb.auth.onAuthStateChange((_e, s) => setSession(s));
+    return () => { if (sub && sub.subscription) sub.subscription.unsubscribe(); };
+  }, []);
+
+  // load cloud data on login
+  useEffect(() => {
+    if (!session) { setDataLoaded(false); return; }
+    let cancel = false;
+    (async () => {
+      try {
+        const d = await cloudLoad(session.user.id);
+        if (cancel) return;
+        if (d) {
+          setProfile({ ...DEFAULT_PROFILE, ...(d.profile || {}) });
+          setFoodLog(d.foodLog || []); setFavorites(d.favorites || []);
+          setBodyLog(d.bodyLog || []); setChatLog(d.chatLog || []);
+          setOnboarded(d.onboarded || false);
+        }
+        setDataLoaded(true);
+      } catch (e) { if (!cancel) { setSyncErr("クラウドからの読み込みに失敗しました。"); setDataLoaded(true); } }
+    })();
+    return () => { cancel = true; };
+  }, [session]);
+
+  // save (debounced) after loaded
+  useEffect(() => {
+    if (!session || !dataLoaded) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      cloudSave(session.user.id, { profile, foodLog, favorites, bodyLog, chatLog: chatLog.slice(-40), onboarded })
+        .then(() => setSyncErr("")).catch(() => setSyncErr("クラウド保存に失敗しました（通信をご確認ください）。"));
+    }, 800);
+  }, [session, dataLoaded, profile, foodLog, favorites, bodyLog, chatLog, onboarded]);
+
+  const targets = useMemo(() => computeTargets(profile), [profile]);
+  const today = todayKey();
+  const todayRows = foodLog.filter((r) => r.date === today);
+  const todaySum = sumLog(todayRows);
+
+  if (!authReady) return <Splash />;
+  if (!session) return <LoginGate />;
+  if (!dataLoaded) return <Splash text="データを読み込んでいます…" />;
+
+  return (
+    <div style={{ fontFamily: FONT_BODY, background: C.canvas, color: C.ink, maxWidth: 460, margin: "0 auto", height: "100dvh", display: "flex", flexDirection: "column" }}>
+      <div style={{ flexShrink: 0, padding: "20px 20px 8px", display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+        <div style={{ fontFamily: FONT_DISP, fontSize: 22, letterSpacing: 3 }}>{APP_NAME}</div>
+        <div style={{ fontSize: 12, color: C.inkSoft }}>{new Date().getMonth() + 1}月{new Date().getDate()}日</div>
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch", padding: "0 16px 24px", animation: "fade .3s ease" }}>
+        {syncErr && <div style={{ marginBottom: 8, fontSize: 11.5, color: C.protein, background: "#FBEDE7", border: `1px solid ${C.line}`, borderRadius: 10, padding: "8px 12px" }}>{syncErr}</div>}
+        {!onboarded && screen !== "settings" && (
+          <Card style={{ background: C.mossSoft, borderColor: C.moss, marginBottom: 14 }}>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>はじめに、からだの情報を</div>
+            <div style={{ fontSize: 13, color: C.inkSoft, marginBottom: 12 }}>身長・体重・目標を入れると、あなたの目標カロリーとPFC配分が決まります。</div>
+            <PrimaryBtn onClick={() => setScreen("settings")}>設定をひらく</PrimaryBtn>
+          </Card>
+        )}
+        {screen === "home" && <HomeScreen profile={profile} targets={targets} todaySum={todaySum} today={today} foodLog={foodLog} setFoodLog={setFoodLog} />}
+        {screen === "record" && <RecordScreen today={today} todaySum={todaySum} todayRows={todayRows} setFoodLog={setFoodLog} favorites={favorites} setFavorites={setFavorites} />}
+        {screen === "body" && <BodyScreen bodyLog={bodyLog} setBodyLog={setBodyLog} />}
+        {screen === "chat" && <ChatScreen profile={profile} targets={targets} chatLog={chatLog} setChatLog={setChatLog} />}
+        {screen === "settings" && <SettingsScreen profile={profile} setProfile={setProfile} targets={targets} email={session.user.email} onDone={() => { setOnboarded(true); setScreen("home"); }} onSignOut={signOutUser} />}
+      </div>
+
+      <div style={{ flexShrink: 0, background: "rgba(251,250,246,.94)", backdropFilter: "blur(8px)", borderTop: `1px solid ${C.line}`, display: "flex", padding: "8px 4px calc(10px + env(safe-area-inset-bottom))" }}>
+        {[{ id: "home", label: "ホーム", icon: Home }, { id: "record", label: "記録", icon: NotebookPen }, { id: "body", label: "からだ", icon: Activity }, { id: "chat", label: "相談", icon: MessageCircle }, { id: "settings", label: "設定", icon: SettingsIcon }].map((t) => {
+          const on = screen === t.id, I = t.icon;
+          return <button key={t.id} onClick={() => setScreen(t.id)} style={{ flex: 1, border: "none", background: "transparent", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, color: on ? C.moss : C.inkFaint, padding: "4px 0" }}><I size={20} strokeWidth={on ? 2.4 : 1.8} /><span style={{ fontSize: 10, fontWeight: on ? 700 : 500 }}>{t.label}</span></button>;
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ===== HOME ===== */
+function HomeScreen({ profile, targets, todaySum, today, foodLog, setFoodLog }) {
+  const [point, setPoint] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState("cook");
+  const [ingredients, setIngredients] = useState("");
+  const [options, setOptions] = useState(null);
+  const [sugLoading, setSugLoading] = useState(false);
+  const [recipes, setRecipes] = useState({});
+  const [recipeLoading, setRecipeLoading] = useState(null);
+  const [addedIdx, setAddedIdx] = useState(null);
+
+  const todayItems = useMemo(() => foodLog.filter((r) => r.date === today).map((r) => r.text), [foodLog, today]);
+  const historySummary = useMemo(() => recentSummary(foodLog, today), [foodLog, today]);
+
+  const baseCtx = { targetKcal: targets.targetKcal, eatenKcal: todaySum.kcal, pG: targets.pG, fG: targets.fG, cG: targets.cG, p: todaySum.p, f: todaySum.f, c: todaySum.c, tone: profile.tone, callName: profile.callName, constitution: profile.constitution, prefs: profile.prefs };
+  const sugCtx = { ...baseCtx, mode, ingredients, todayItems, historySummary };
+
+  const refresh = async () => { setLoading(true); try { setPoint(await companionPoint(baseCtx)); } catch { setPoint("ポイントを取得できませんでした（AIを使うには「設定」でAPIキーを登録してください。通信エラーの場合もあります）。記録は続けられます。"); } setLoading(false); };
+  useEffect(() => { refresh(); }, [todaySum.kcal, profile.tone]);
+
+  const runSuggest = async (reroll) => {
+    setSugLoading(true); setRecipes({}); setAddedIdx(null);
+    const avoidNames = reroll && options ? options.map((o) => o.name) : [];
+    try { setOptions(await suggestMeal({ ...sugCtx, avoidNames })); } catch { setOptions([]); }
+    setSugLoading(false);
+  };
+  const openRecipe = async (i, name) => { setRecipeLoading(i); try { const r = await getRecipe(sugCtx, name, mode); setRecipes((m) => ({ ...m, [i]: { ...r, _mode: mode } })); } catch { setRecipes((m) => ({ ...m, [i]: { error: true } })); } setRecipeLoading(null); };
+  const logRecipe = (i, r) => { setFoodLog((prev) => [{ id: Date.now(), date: today, time: nowHHMM(), text: r.title, kcal: Math.round(r.kcal || 0), p: Math.round(r.p || 0), f: Math.round(r.f || 0), c: Math.round(r.c || 0) }, ...prev]); setAddedIdx(i); };
+
+  const target3 = { p: targets.pPct, f: targets.fPct, c: targets.cPct };
+  const actual3 = actualRatio(todaySum);
+
+  return (
+    <>
+      <Card style={{ marginBottom: 14 }}>
+        <Eyebrow>今日のポイント</Eyebrow>
+        <div style={{ minHeight: 46, marginTop: 8, fontSize: 15.5, lineHeight: 1.65, fontFamily: FONT_DISP }}>
+          {loading ? <span style={{ color: C.inkFaint, display: "inline-flex", gap: 6, alignItems: "center" }}><Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> 確認しています…</span> : (point || "食事を記録すると、ここに今日のポイントが出ます。")}
+        </div>
+        <button onClick={refresh} style={{ marginTop: 10, background: "none", border: "none", color: C.inkSoft, fontSize: 12, cursor: "pointer", display: "inline-flex", gap: 5, alignItems: "center" }}><Sparkles size={13} /> 更新</button>
+      </Card>
+
+      <Card style={{ marginBottom: 14 }}>
+        <Eyebrow>今日のバランス</Eyebrow>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "14px 0 18px" }}>
+          <CalorieRing eaten={todaySum.kcal} target={targets.targetKcal} />
+          <div style={{ flex: 1, fontSize: 13, color: C.inkSoft, lineHeight: 1.8 }}>
+            <div>目標 <b style={{ color: C.ink }}>{targets.targetKcal}</b> kcal</div>
+            <div>摂取 <b style={{ color: C.ink }}>{Math.round(todaySum.kcal)}</b> kcal</div>
+            <div style={{ fontSize: 11, color: C.inkFaint, marginTop: 6 }}>理想 PFC {targets.pPct}:{targets.fPct}:{targets.cPct}</div>
+          </div>
+        </div>
+        <PFCColumns s={todaySum} t={targets} />
+        <div style={{ height: 1, background: C.line, margin: "18px 0 14px" }} />
+        <Eyebrow>比率の比較</Eyebrow>
+        <div style={{ marginTop: 10 }}><RatioBars target={target3} actual={actual3} /></div>
+      </Card>
+
+      <Card>
+        <Eyebrow>メニューを提案してもらう</Eyebrow>
+        <div style={{ fontSize: 12.5, color: C.inkSoft, margin: "8px 0 10px" }}>今日の記録と被らないよう、残りの枠・体質・いつもの傾向をふまえて提案します。</div>
+        <div style={{ marginBottom: 10 }}>
+          <Segmented value={mode} onChange={(v) => { setMode(v); setOptions(null); setRecipes({}); }} options={[{ v: "cook", l: "自炊" }, { v: "eatout", l: "外食・デリバリー" }]} />
+        </div>
+        {mode === "cook" && <input value={ingredients} onChange={(e) => setIngredients(e.target.value)} placeholder="今ある材料（例：鶏むね、豆腐、トマト）任意" style={inputStyle} />}
+        <PrimaryBtn onClick={() => runSuggest(false)} disabled={sugLoading} style={{ marginTop: 10 }}>{sugLoading ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Sparkles size={16} />} 提案する</PrimaryBtn>
+        {options && options.length > 0 && (
+          <>
+            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+              {options.map((o, i) => (
+                <div key={i} style={{ border: `1px solid ${C.line}`, borderRadius: 12, padding: 12, background: C.surfaceAlt }}>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{o.name}</div>
+                  <div style={{ fontSize: 11.5, color: C.inkSoft, marginTop: 3 }}>{o.kcal}kcal · P{o.p} F{o.f} C{o.c}{o.note ? ` · ${o.note}` : ""}</div>
+                  {!recipes[i] && <GhostBtn onClick={() => openRecipe(i, o.name)} disabled={recipeLoading === i} style={{ marginTop: 10 }}>{recipeLoading === i ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <ChefHat size={15} />} {mode === "eatout" ? "頼み方を見る" : "これで作る（レシピを見る）"}</GhostBtn>}
+                  {recipes[i] && !recipes[i].error && <RecipeView r={recipes[i]} mode={recipes[i]._mode} added={addedIdx === i} onLog={() => logRecipe(i, recipes[i])} />}
+                  {recipes[i] && recipes[i].error && <div style={{ fontSize: 12, color: C.protein, marginTop: 8 }}>取得できませんでした。もう一度お試しください。</div>}
+                </div>
+              ))}
+            </div>
+            <GhostBtn onClick={() => runSuggest(true)} disabled={sugLoading} style={{ marginTop: 10 }}>{sugLoading ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <Sparkles size={14} />} 別の案を出す</GhostBtn>
+          </>
+        )}
+        {options && options.length === 0 && <div style={{ fontSize: 12.5, color: C.inkSoft, marginTop: 10 }}>提案を取得できませんでした。もう一度お試しください。</div>}
+      </Card>
+    </>
+  );
+}
+
+/* ===== RECORD ===== */
+function RecordScreen({ today, todaySum, todayRows, setFoodLog, favorites, setFavorites }) {
+  const [text, setText] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [draft, setDraft] = useState(null);
+  const [error, setError] = useState("");
+  const blankEntry = () => ({ time: "", name: "", kcal: 0, p: 0, f: 0, c: 0 });
+
+  const estimate = async () => {
+    if (!text.trim()) return;
+    setLoading(true); setError("");
+    try {
+      const r = await estimateFood(text.trim());
+      const entries = (r.entries || []).map((e) => ({ time: e.time || "", name: e.name || "", kcal: Math.round(e.kcal || 0), p: Math.round(e.p || 0), f: Math.round(e.f || 0), c: Math.round(e.c || 0) }));
+      setDraft({ entries: entries.length ? entries : [{ ...blankEntry(), name: text.trim() }], confidence: r.confidence || "medium", note: r.note || "" });
+    } catch {
+      setDraft({ entries: [{ ...blankEntry(), name: text.trim() }], confidence: "low", note: "自動推定に失敗しました。数値を手で入力してください。" });
+      setError("推定に失敗しました（AIを使うには「設定」でAPIキーを登録してください。通信エラーの場合もあります）。手入力モードにしました。");
+    }
+    setLoading(false);
+  };
+  const editEntry = (i, k, v) => setDraft((d) => ({ ...d, entries: d.entries.map((e, idx) => idx === i ? { ...e, [k]: (k === "name" || k === "time") ? v : (v === "" ? "" : Math.max(0, +v)) } : e) }));
+  const removeEntry = (i) => setDraft((d) => ({ ...d, entries: d.entries.filter((_, idx) => idx !== i) }));
+  const addEntry = () => setDraft((d) => ({ ...d, entries: [...d.entries, blankEntry()] }));
+  const confirmAll = () => { const rows = draft.entries.map((e, i) => ({ id: Date.now() + i, date: today, time: e.time || nowHHMM(), text: e.name || "（無題）", kcal: +e.kcal || 0, p: +e.p || 0, f: +e.f || 0, c: +e.c || 0 })); setFoodLog((prev) => [...rows, ...prev]); setDraft(null); setText(""); setError(""); };
+  const saveFav = (e) => setFavorites((prev) => [{ name: (e.name || "").slice(0, 18), kcal: +e.kcal || 0, p: +e.p || 0, f: +e.f || 0, c: +e.c || 0 }, ...prev].slice(0, 24));
+  const addFav = (fav) => setFoodLog((prev) => [{ id: Date.now(), date: today, time: nowHHMM(), text: fav.name, ...fav }, ...prev]);
+  const del = (id) => setFoodLog((prev) => prev.filter((r) => r.id !== id));
+
+  const [editId, setEditId] = useState(null);
+  const [editVals, setEditVals] = useState(null);
+  const startEdit = (r) => { setEditId(r.id); setEditVals({ time: r.time || "", name: r.text || "", kcal: r.kcal, p: r.p, f: r.f, c: r.c }); };
+  const editVal = (k, v) => setEditVals((p) => ({ ...p, [k]: (k === "name" || k === "time") ? v : (v === "" ? "" : Math.max(0, +v)) }));
+  const saveEdit = () => { setFoodLog((prev) => prev.map((row) => row.id === editId ? { ...row, time: editVals.time || nowHHMM(), text: editVals.name || "（無題）", kcal: +editVals.kcal || 0, p: +editVals.p || 0, f: +editVals.f || 0, c: +editVals.c || 0 } : row)); setEditId(null); setEditVals(null); };
+  const cancelEdit = () => { setEditId(null); setEditVals(null); };
+
+  const confColor = { high: C.carb, medium: C.fat, low: C.protein };
+  const confLabel = { high: "推定の自信：高", medium: "推定の自信：中", low: "推定の自信：低" };
+  const sortedToday = [...todayRows].sort((a, b) => (a.time || "99:99").localeCompare(b.time || "99:99"));
+
+  return (
+    <>
+      <Card style={{ marginBottom: 14 }}>
+        <Eyebrow>食べたものを記録</Eyebrow>
+        <div style={{ fontSize: 12.5, color: C.inkSoft, margin: "8px 0 10px", lineHeight: 1.6 }}>テキストで送ると概算します。<b>9:00 / 12:00</b> のように時刻を書けば、その通りタイミングごとに分けて記録します。数値は下書きなので、直してから確定できます。</div>
+        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} placeholder={"例（まとめ書き）：\n9:00 トーストとゆで卵、コーヒー\n12:30 鮭弁当\n19:00 サラダと鶏むね"} style={{ ...inputStyle, resize: "none" }} />
+        <PrimaryBtn onClick={estimate} disabled={loading || !text.trim()} style={{ marginTop: 10 }}>{loading ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Send size={15} />} 概算する</PrimaryBtn>
+        {error && <div style={{ fontSize: 12, color: C.protein, marginTop: 8 }}>{error}</div>}
+      </Card>
+
+      {draft && (
+        <Card style={{ marginBottom: 14, borderColor: C.moss }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+            <Eyebrow>下書き（{draft.entries.length}件・編集できます）</Eyebrow>
+            <span style={{ fontSize: 11, color: confColor[draft.confidence], fontWeight: 700 }}>{confLabel[draft.confidence]}</span>
+          </div>
+          {draft.entries.map((e, i) => (
+            <div key={i} style={{ borderTop: `1px solid ${C.line}`, paddingTop: 12, marginTop: 12 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+                <input type="time" value={e.time} onChange={(ev) => editEntry(i, "time", ev.target.value)} style={{ ...inputStyle, width: 120, padding: "8px 10px" }} />
+                <input value={e.name} onChange={(ev) => editEntry(i, "name", ev.target.value)} placeholder="品名" style={{ ...inputStyle, padding: "8px 10px" }} />
+                <button onClick={() => saveFav(e)} title="お気に入り登録" style={{ border: "none", background: "none", cursor: "pointer", color: C.inkFaint, flexShrink: 0 }}><Star size={16} /></button>
+                <button onClick={() => removeEntry(i)} title="削除" style={{ border: "none", background: "none", cursor: "pointer", color: C.inkFaint, flexShrink: 0 }}><X size={16} /></button>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8 }}>
+                {[{ k: "kcal", l: "kcal" }, { k: "p", l: "P g" }, { k: "f", l: "F g" }, { k: "c", l: "C g" }].map((fld) => (
+                  <label key={fld.k} style={{ fontSize: 10, color: C.inkSoft }}>{fld.l}<input type="number" value={e[fld.k]} onChange={(ev) => editEntry(i, fld.k, ev.target.value)} style={{ ...inputStyle, padding: "7px 8px", fontSize: 15, marginTop: 3 }} /></label>
+                ))}
+              </div>
+            </div>
+          ))}
+          {draft.note && <div style={{ fontSize: 11.5, color: C.inkSoft, marginTop: 12, lineHeight: 1.6 }}>※ {draft.note}</div>}
+          <button onClick={addEntry} style={{ marginTop: 12, background: "none", border: "none", color: C.moss, fontSize: 12.5, cursor: "pointer", display: "inline-flex", gap: 5, alignItems: "center", fontWeight: 600 }}><Plus size={14} /> 項目を追加</button>
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            <PrimaryBtn onClick={confirmAll}><Check size={16} /> すべて確定して記録</PrimaryBtn>
+            <GhostBtn onClick={() => setDraft(null)} style={{ flexShrink: 0, width: "auto" }}><X size={14} /></GhostBtn>
+          </div>
+        </Card>
+      )}
+
+      {favorites.length > 0 && !draft && (
+        <Card style={{ marginBottom: 14 }}>
+          <Eyebrow>よく食べるもの</Eyebrow>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+            {favorites.map((f, i) => (
+              <button key={i} onClick={() => addFav(f)} style={{ border: `1px solid ${C.line}`, background: C.surfaceAlt, borderRadius: 20, padding: "7px 12px", fontSize: 12.5, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, color: C.ink, fontFamily: FONT_BODY }}><Plus size={13} color={C.moss} /> {f.name} <span style={{ color: C.inkFaint }}>{f.kcal}kcal</span></button>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+          <Eyebrow>今日の記録</Eyebrow><span style={{ fontSize: 12, color: C.inkSoft }}>合計 {Math.round(todaySum.kcal)} kcal</span>
+        </div>
+        {sortedToday.length === 0 ? (
+          <div style={{ fontSize: 13, color: C.inkFaint, padding: "18px 0", textAlign: "center" }}>まだ記録がありません。上から最初の一品を。</div>
+        ) : (
+          <div style={{ marginTop: 10 }}>
+            {sortedToday.map((r) => editId === r.id ? (
+              <div key={r.id} style={{ borderTop: `1px solid ${C.line}`, paddingTop: 12, marginTop: 12 }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+                  <input type="time" value={editVals.time} onChange={(ev) => editVal("time", ev.target.value)} style={{ ...inputStyle, width: 120, padding: "8px 10px" }} />
+                  <input value={editVals.name} onChange={(ev) => editVal("name", ev.target.value)} placeholder="品名" style={{ ...inputStyle, padding: "8px 10px" }} />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8 }}>
+                  {[{ k: "kcal", l: "kcal" }, { k: "p", l: "P g" }, { k: "f", l: "F g" }, { k: "c", l: "C g" }].map((fld) => (
+                    <label key={fld.k} style={{ fontSize: 10, color: C.inkSoft }}>{fld.l}<input type="number" value={editVals[fld.k]} onChange={(ev) => editVal(fld.k, ev.target.value)} style={{ ...inputStyle, padding: "7px 8px", fontSize: 15, marginTop: 3 }} /></label>
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                  <PrimaryBtn onClick={saveEdit}><Check size={16} /> 保存</PrimaryBtn>
+                  <GhostBtn onClick={cancelEdit} style={{ flexShrink: 0, width: "auto" }}><X size={14} /></GhostBtn>
+                </div>
+              </div>
+            ) : (
+              <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 0", borderTop: `1px solid ${C.line}` }}>
+                <div style={{ fontSize: 11, color: C.inkFaint, width: 38 }}>{r.time}</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13.5 }}>{r.text}</div>
+                  <div style={{ fontSize: 11, color: C.inkSoft, marginTop: 2 }}>{r.kcal}kcal · P{r.p} F{r.f} C{r.c}</div>
+                </div>
+                <button onClick={() => startEdit(r)} title="編集" style={{ border: "none", background: "none", cursor: "pointer", color: C.inkFaint, padding: 2 }}><Pencil size={15} /></button>
+                <button onClick={() => del(r.id)} title="削除" style={{ border: "none", background: "none", cursor: "pointer", color: C.inkFaint, padding: 2 }}><Trash2 size={16} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </>
+  );
+}
+
+/* ===== BODY ===== */
+function BodyScreen({ bodyLog, setBodyLog }) {
+  const [date, setDate] = useState(todayKey());
+  const [weight, setWeight] = useState("");
+  const [bodyFat, setBodyFat] = useState("");
+  const add = () => { if (!weight) return; setBodyLog((prev) => { const without = prev.filter((r) => r.date !== date); return [...without, { date, weight: +weight, bodyFat: bodyFat ? +bodyFat : null }].sort((a, b) => a.date.localeCompare(b.date)); }); setWeight(""); setBodyFat(""); };
+  const data = bodyLog.map((r) => ({ ...r, label: fmtDate(r.date) }));
+  const latest = bodyLog[bodyLog.length - 1], first = bodyLog[0];
+  const delta = latest && first ? (latest.weight - first.weight).toFixed(1) : null;
+
+  return (
+    <>
+      <Card style={{ marginBottom: 14 }}>
+        <Eyebrow>体重・体脂肪を記録</Eyebrow>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
+          <label style={{ fontSize: 11, color: C.inkSoft }}>日付<input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ ...inputStyle, marginTop: 4 }} /></label>
+          <div />
+          <label style={{ fontSize: 11, color: C.inkSoft }}>体重 (kg)<input type="number" step="0.1" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="55.0" style={{ ...inputStyle, marginTop: 4 }} /></label>
+          <label style={{ fontSize: 11, color: C.inkSoft }}>体脂肪率 (%)<input type="number" step="0.1" value={bodyFat} onChange={(e) => setBodyFat(e.target.value)} placeholder="任意" style={{ ...inputStyle, marginTop: 4 }} /></label>
+        </div>
+        <PrimaryBtn onClick={add} disabled={!weight} style={{ marginTop: 12 }}><Check size={16} /> この日の記録を保存</PrimaryBtn>
+      </Card>
+
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+          <Eyebrow>推移</Eyebrow>
+          {delta !== null && <span style={{ fontSize: 12, color: +delta <= 0 ? C.moss : C.protein, fontWeight: 700 }}>開始から {delta > 0 ? "+" : ""}{delta} kg</span>}
+        </div>
+        {data.length === 0 ? (
+          <div style={{ fontSize: 13, color: C.inkFaint, padding: "28px 0", textAlign: "center" }}>記録すると、ここに折れ線が育っていきます。</div>
+        ) : (
+          <div style={{ marginTop: 8 }}>
+            <MiniLineChart data={data} />
+            <div style={{ display: "flex", gap: 16, justifyContent: "center", marginTop: 6, fontSize: 11, color: C.inkSoft }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 14, height: 3, background: C.moss, borderRadius: 2 }} /> 体重</span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 14, height: 3, background: C.carb, borderRadius: 2 }} /> 体脂肪</span>
+            </div>
+          </div>
+        )}
+      </Card>
+    </>
+  );
+}
+
+/* ===== CHAT ===== */
+function ChatScreen({ profile, targets, chatLog, setChatLog }) {
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const endRef = useRef(null);
+  useEffect(() => { if (endRef.current) endRef.current.scrollIntoView({ behavior: "smooth" }); }, [chatLog, loading]);
+
+  const send = async (preset) => {
+    const content = (preset != null ? preset : input).trim();
+    if (!content || loading) return;
+    const next = [...chatLog, { role: "user", content }];
+    setChatLog(next); setInput(""); setLoading(true);
+    try { const reply = await chatReply(profile, targets, next); setChatLog([...next, { role: "assistant", content: reply }]); }
+    catch { setChatLog([...next, { role: "assistant", content: "うまく返信できませんでした（AIを使うには「設定」でAPIキーを登録してください。通信エラーの場合もあります）。" }]); }
+    setLoading(false);
+  };
+  const chips = ["最近モチベが下がってきた", "プロテインって必要？", "停滞期かもしれない", "外食が続くときのコツは？"];
+
+  return (
+    <>
+      <Card style={{ marginBottom: 14 }}>
+        <Eyebrow>ダイエットの相談</Eyebrow>
+        <div style={{ fontSize: 12.5, color: C.inkSoft, marginTop: 8, lineHeight: 1.6 }}>サプリ・運動・習慣・モチベーションなど、気軽にどうぞ。体質や目標もふまえて答えます。医学的な判断が必要なことは、専門家への相談をおすすめします。</div>
+      </Card>
+      {chatLog.length === 0 && !loading && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
+          {chips.map((c) => <button key={c} onClick={() => send(c)} style={{ border: `1px solid ${C.line}`, background: C.surface, borderRadius: 20, padding: "8px 13px", fontSize: 12.5, cursor: "pointer", color: C.ink, fontFamily: FONT_BODY }}>{c}</button>)}
+        </div>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
+        {chatLog.map((m, i) => (
+          <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "85%" }}>
+            <div style={{ padding: "11px 14px", borderRadius: 16, fontSize: 14, lineHeight: 1.65, whiteSpace: "pre-wrap", background: m.role === "user" ? C.moss : C.surface, color: m.role === "user" ? "#fff" : C.ink, border: m.role === "user" ? "none" : `1px solid ${C.line}`, borderBottomRightRadius: m.role === "user" ? 4 : 16, borderBottomLeftRadius: m.role === "user" ? 16 : 4 }}>{m.content}</div>
+          </div>
+        ))}
+        {loading && <div style={{ alignSelf: "flex-start", color: C.inkFaint, fontSize: 13, display: "inline-flex", gap: 6, alignItems: "center", padding: "4px 6px" }}><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> 考えています…</div>}
+        <div ref={endRef} />
+      </div>
+      <div style={{ position: "sticky", bottom: 0, display: "flex", gap: 8, alignItems: "flex-end", background: C.canvas, paddingTop: 8 }}>
+        <textarea value={input} onChange={(e) => setInput(e.target.value)} rows={1} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder="メッセージを入力" style={{ ...inputStyle, resize: "none", minHeight: 44 }} />
+        <button onClick={() => send()} disabled={loading || !input.trim()} style={{ flexShrink: 0, width: 46, height: 46, borderRadius: 14, border: "none", background: (loading || !input.trim()) ? C.inkFaint : C.moss, color: "#fff", cursor: "pointer", display: "grid", placeItems: "center" }}><Send size={18} /></button>
+      </div>
+    </>
+  );
+}
+
+/* ===== SETTINGS ===== */
+function SettingsScreen({ profile, setProfile, targets, onDone, email, onSignOut }) {
+  const set = (k, v) => setProfile((p) => ({ ...p, [k]: v }));
+  const [diag, setDiag] = useState("");
+  const [diagLoading, setDiagLoading] = useState(false);
+  const [proposal, setProposal] = useState(null);
+  const [diagErr, setDiagErr] = useState("");
+  const [keyInput, setKeyInput] = useState("");
+  const [keySaved, setKeySaved] = useState(!!API_KEY);
+
+  const runDiag = async () => { if (!diag.trim()) return; setDiagLoading(true); setDiagErr(""); setProposal(null); try { setProposal(await proposeLevers(diag.trim())); } catch { setDiagErr("読み取りに失敗しました。レバーは手動で設定できます。"); } setDiagLoading(false); };
+  const applyProposal = () => { if (FAT_LEVERS[proposal.fatLever]) set("fatLever", proposal.fatLever); if (PRO_LEVERS[proposal.proteinLever]) set("proteinLever", proposal.proteinLever); if (diag.trim()) set("constitution", diag.trim()); setProposal(null); setDiag(""); };
+
+  return (
+    <>
+      <Card style={{ marginBottom: 14 }}>
+        <Eyebrow>からだの情報（目標を決める）</Eyebrow>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 12 }}>
+          <Field label="年齢"><input type="number" value={profile.age} onChange={(e) => set("age", e.target.value)} style={inputStyle} /></Field>
+          <Field label="性別"><Segmented value={profile.sex} onChange={(v) => set("sex", v)} options={[{ v: "female", l: "女性" }, { v: "male", l: "男性" }]} /></Field>
+          <Field label="身長 (cm)"><input type="number" value={profile.height} onChange={(e) => set("height", e.target.value)} style={inputStyle} /></Field>
+          <Field label="体重 (kg)"><input type="number" step="0.1" value={profile.weight} onChange={(e) => set("weight", e.target.value)} style={inputStyle} /></Field>
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <Field label="活動量"><select value={profile.activity} onChange={(e) => set("activity", e.target.value)} style={inputStyle}>{ACTIVITIES.map((a) => <option key={a.id} value={a.id}>{a.label}（{a.note}）</option>)}</select></Field>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 12 }}>
+          <Field label="目標"><Segmented value={profile.goal} onChange={(v) => set("goal", v)} options={[{ v: "lose", l: "減量" }, { v: "maintain", l: "維持" }]} /></Field>
+          {profile.goal === "lose" && <Field label="ペース"><Segmented value={profile.pace} onChange={(v) => set("pace", v)} options={[{ v: "slow", l: "ゆっくり" }, { v: "standard", l: "標準" }]} /></Field>}
+        </div>
+      </Card>
+
+      <Card style={{ marginBottom: 14, background: C.mossSoft, borderColor: C.moss }}>
+        <Eyebrow>算出された目標</Eyebrow>
+        <div style={{ display: "flex", gap: 16, marginTop: 10, alignItems: "baseline" }}>
+          <div><div style={{ fontFamily: FONT_DISP, fontSize: 30, color: C.ink }}>{targets.targetKcal}</div><div style={{ fontSize: 11, color: C.inkSoft }}>目標 kcal / 日</div></div>
+          <div style={{ fontSize: 12, color: C.inkSoft, lineHeight: 1.8 }}>基礎代謝 {targets.bmr} / 消費 {targets.tdee} kcal<br />PFC {targets.pPct}:{targets.fPct}:{targets.cPct}（P{targets.pG} F{targets.fG} C{targets.cG}g）</div>
+        </div>
+        {targets.floored && <div style={{ fontSize: 11.5, color: C.protein, marginTop: 10, lineHeight: 1.6 }}>※ 安全のため、目標は基礎代謝を下回らない値で止めています。</div>}
+      </Card>
+
+      <Card style={{ marginBottom: 14 }}>
+        <Eyebrow>体質によるPFC調整</Eyebrow>
+        <div style={{ fontSize: 12.5, color: C.inkSoft, margin: "8px 0 12px", lineHeight: 1.6 }}>総カロリーは固定したまま、配分だけを動かします。標準（P15 / F25 / C60）を起点に、下のレバーで寄せます。</div>
+        <Lever label="脂質" levers={FAT_LEVERS} value={profile.fatLever} onChange={(v) => set("fatLever", v)} color={C.fat} />
+        <Lever label="たんぱく質" levers={PRO_LEVERS} value={profile.proteinLever} onChange={(v) => set("proteinLever", v)} color={C.protein} />
+        <div style={{ fontSize: 11, color: C.inkFaint, marginTop: 4 }}>炭水化物は残り（{targets.cPct}%）。脂質の下限20%・たんぱく質の上限25%でガードしています。</div>
+      </Card>
+
+      <Card style={{ marginBottom: 14 }}>
+        <Eyebrow>検査結果から調整案をもらう</Eyebrow>
+        <div style={{ fontSize: 12.5, color: C.inkSoft, margin: "8px 0 10px", lineHeight: 1.6 }}>唾液・血液などの検査結果や体質メモを貼ると、レバーの調整案を出します。最終的な確定はご自身で（医学的診断ではありません）。</div>
+        <textarea value={diag} onChange={(e) => setDiag(e.target.value)} rows={3} placeholder="例：脂質分解に関わる遺伝子に軽度の変異。タンパク質吸収がやや低い傾向。" style={{ ...inputStyle, resize: "none" }} />
+        <PrimaryBtn onClick={runDiag} disabled={diagLoading || !diag.trim()} style={{ marginTop: 10 }}>{diagLoading ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Sparkles size={16} />} 調整案を出す</PrimaryBtn>
+        {diagErr && <div style={{ fontSize: 12, color: C.protein, marginTop: 8 }}>{diagErr}</div>}
+        {proposal && (
+          <div style={{ marginTop: 12, padding: 12, background: C.surfaceAlt, borderRadius: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>調整案</div>
+            <div style={{ fontSize: 13, color: C.ink }}>脂質：<b>{(FAT_LEVERS[proposal.fatLever] || {}).label || proposal.fatLever}</b> ／ たんぱく質：<b>{(PRO_LEVERS[proposal.proteinLever] || {}).label || proposal.proteinLever}</b></div>
+            <div style={{ fontSize: 12, color: C.inkSoft, marginTop: 8, lineHeight: 1.6 }}>{proposal.rationale}</div>
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <PrimaryBtn onClick={applyProposal}><Check size={15} /> この案を反映</PrimaryBtn>
+              <GhostBtn onClick={() => setProposal(null)} style={{ width: "auto" }}>見送る</GhostBtn>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      <Card style={{ marginBottom: 14 }}>
+        <Eyebrow>声かけの設定</Eyebrow>
+        <div style={{ marginTop: 12 }}><Field label="あなたの呼び方（二人称）"><input value={profile.callName} onChange={(e) => set("callName", e.target.value)} placeholder="例：おゆぷろさん / きみ / あなた（空欄も可）" style={inputStyle} /></Field></div>
+        <div style={{ marginTop: 14 }}><Field label="トーン"><Segmented value={profile.tone} onChange={(v) => set("tone", v)} options={Object.entries(TONES).map(([v, t]) => ({ v, l: t.label }))} /></Field></div>
+        <div style={{ marginTop: 14 }}><Field label="好み・苦手・アレルギー（任意）"><textarea value={profile.prefs} onChange={(e) => set("prefs", e.target.value)} rows={2} placeholder="例：魚は好き。揚げ物は控えたい。乳製品が少し苦手。" style={{ ...inputStyle, resize: "none" }} /></Field></div>
+      </Card>
+
+      <Card style={{ marginBottom: 14 }}>
+        <Eyebrow>AIのAPIキー</Eyebrow>
+        <div style={{ fontSize: 12.5, color: C.inkSoft, margin: "8px 0 12px", lineHeight: 1.6 }}>
+          推定・提案・相談のAI機能に必要です。キーは<b>この端末の中だけ</b>に保存され（同期はされません）、外部には送られません。状態：<b style={{ color: keySaved ? C.moss : C.protein }}>{keySaved ? "登録済み" : "未登録"}</b>
+        </div>
+        <Field label="APIキー（sk-ant- で始まる）">
+          <input value={keyInput} onChange={(e) => setKeyInput(e.target.value)} type="password" placeholder={keySaved ? "別のキーに変更する場合のみ入力" : "sk-ant-..."} style={inputStyle} autoComplete="off" />
+        </Field>
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <PrimaryBtn onClick={() => { if (keyInput.trim()) { setApiKey(keyInput.trim()); setKeySaved(true); setKeyInput(""); } }} disabled={!keyInput.trim()}><Check size={15} /> キーを保存</PrimaryBtn>
+          {keySaved && <GhostBtn onClick={() => { setApiKey(""); setKeySaved(false); }} style={{ width: "auto" }}>削除</GhostBtn>}
+        </div>
+        <div style={{ fontSize: 11.5, color: C.inkSoft, marginTop: 12, lineHeight: 1.7 }}>キーは <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" style={{ color: C.moss }}>console.anthropic.com</a> で発行できます（従量課金）。</div>
+      </Card>
+
+      <Card style={{ marginBottom: 14 }}>
+        <Eyebrow>アカウント</Eyebrow>
+        <div style={{ fontSize: 12.5, color: C.inkSoft, margin: "8px 0 12px", lineHeight: 1.6 }}>ログイン中：{email || "—"}</div>
+        <GhostBtn onClick={onSignOut}>ログアウト</GhostBtn>
+      </Card>
+
+      <PrimaryBtn onClick={onDone} style={{ marginBottom: 8 }}><Check size={16} /> 保存してホームへ</PrimaryBtn>
+      <div style={{ fontSize: 11, color: C.inkFaint, textAlign: "center", lineHeight: 1.6, padding: "4px 12px 0" }}>健康・栄養の最終判断は、検査機関や医師・管理栄養士にご相談ください。</div>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+<script>
+/* ホーム画面アイコンを実行時に生成（単一ファイルを保つため） */
+(function () {
+  try {
+    var cv = document.createElement("canvas"); cv.width = cv.height = 512;
+    var x = cv.getContext("2d");
+    x.fillStyle = "#5C6650";
+    var r = 96;
+    x.beginPath();
+    x.moveTo(r, 0); x.arcTo(512, 0, 512, 512, r); x.arcTo(512, 512, 0, 512, r);
+    x.arcTo(0, 512, 0, 0, r); x.arcTo(0, 0, 512, 0, r); x.closePath(); x.fill();
+    x.strokeStyle = "rgba(255,255,255,.85)"; x.lineWidth = 22;
+    x.beginPath(); x.arc(256, 232, 120, -Math.PI * 0.6, Math.PI * 1.25); x.stroke();
+    x.fillStyle = "#fff"; x.textAlign = "center"; x.textBaseline = "middle";
+    x.font = "300 220px 'Hiragino Mincho ProN','Yu Mincho',serif";
+    x.fillText("は", 256, 250);
+    var url = cv.toDataURL("image/png");
+    function link(rel) { var l = document.createElement("link"); l.rel = rel; l.href = url; if (rel === "icon") l.type = "image/png"; document.head.appendChild(l); }
+    link("apple-touch-icon"); link("icon");
+  } catch (e) {}
+})();
+</script>
+</body>
+</html>
