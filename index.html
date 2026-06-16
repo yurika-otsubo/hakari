@@ -100,6 +100,27 @@ const TONES = { warm: { label: "寄り添い" }, plain: { label: "事務的" } }
 const todayKey = () => new Date().toISOString().slice(0, 10);
 const nowHHMM = () => new Date().toTimeString().slice(0, 5);
 const fmtDate = (k) => { const d = new Date(k + "T00:00:00"); return `${d.getMonth() + 1}/${d.getDate()}`; };
+const WD = ["日", "月", "火", "水", "木", "金", "土"];
+const fmtDateFull = (k) => { const d = new Date(k + "T00:00:00"); return `${d.getMonth() + 1}月${d.getDate()}日(${WD[d.getDay()]})`; };
+const shiftDate = (k, delta) => { const d = new Date(k + "T00:00:00"); d.setDate(d.getDate() + delta); return d.toISOString().slice(0, 10); };
+function sleepHours(from, to) {
+  if (!from || !to) return null;
+  const [fh, fm] = from.split(":").map(Number), [th, tm] = to.split(":").map(Number);
+  let mins = (th * 60 + tm) - (fh * 60 + fm); if (mins <= 0) mins += 24 * 60;
+  return Math.round((mins / 60) * 10) / 10;
+}
+const WAKE = { fresh: "すっきり", normal: "ふつう", tired: "だるい" };
+function condText(c) {
+  if (!c) return "なし";
+  const p = [];
+  const h = sleepHours(c.sleepFrom, c.sleepTo);
+  if (h != null) p.push(`睡眠${h}h${c.wake ? `(寝起き:${WAKE[c.wake] || c.wake})` : ""}`);
+  else if (c.wake) p.push(`寝起き:${WAKE[c.wake] || c.wake}`);
+  if (c.poop) p.push(`お通じ${c.poop}回`);
+  if (c.exercise && c.exercise.trim()) p.push(`運動:${c.exercise.trim()}`);
+  if (c.memo && c.memo.trim()) p.push(`体調:${c.memo.trim()}`);
+  return p.length ? p.join("、") : "なし";
+}
 
 /* ===== compute ===== */
 function computeTargets(p) {
@@ -172,7 +193,7 @@ async function proposeLevers(text) {
 }
 async function companionPoint(ctx) {
   const sys = "あなたはダイエットの伴走アシスタント。今日の数値から、実用的な一言ポイント（気づきや次の一手）を1文で返す。励ましやねぎらい（『よく頑張りましたね』『無理せず続けましょう』等）は不要。事実にもとづく具体的な内容にする。" + toneNoteOf(ctx.tone) + callNameNote(ctx.callName) + "医学的断定はしない。出力はポイント本文のみ。";
-  const u = `目標カロリー${ctx.targetKcal}/摂取${ctx.eatenKcal}/残り${ctx.targetKcal - ctx.eatenKcal}kcal。たんぱく質 残り${ctx.pG - ctx.p}g、脂質 残り${ctx.fG - ctx.f}g、炭水化物 残り${ctx.cG - ctx.c}g。体質メモ:${ctx.constitution || "なし"}。`;
+  const u = `目標カロリー${ctx.targetKcal}/摂取${ctx.eatenKcal}/残り${ctx.targetKcal - ctx.eatenKcal}kcal。たんぱく質 残り${ctx.pG - ctx.p}g、脂質 残り${ctx.fG - ctx.f}g、炭水化物 残り${ctx.cG - ctx.c}g。体質メモ:${ctx.constitution || "なし"}。今日のコンディション:${ctx.condition || "なし"}。`;
   return (await callClaude(sys, u)).trim();
 }
 function recentSummary(foodLog, today) {
@@ -202,8 +223,9 @@ async function suggestMeal(ctx) {
     "(3) 『普段の傾向』には自然に沿う（よく食べる系統や食材を尊重）。ただし(2)を優先。" +
     "(4) 残りのPFCに沿う（炭水化物が多い日は主食控えめでたんぱく質寄り等）。" +
     "(5) 好みは方向性の参考。好みの食材を毎回主役にしない。" +
-    (over ? "(6) 【重要】今日はすでにカロリー超過。重い一食を勧めず、汁物・サラダ・たんぱく質少量など軽いものや『次の食事で調整』の方向で、無理のない控えめな提案にする。" : "") +
-    (ctx.avoidNames && ctx.avoidNames.length ? `(7) 次の案は出さず別案にする：${ctx.avoidNames.join("、")}。` : "") +
+    "(6) 『今日のコンディション』があれば反映する（お腹が張る→消化に優しく、風邪気味→温かくたんぱく質とビタミン、運動した日→たんぱく質多め、睡眠不足→重すぎない等）。" +
+    (over ? "(7) 【重要】今日はすでにカロリー超過。重い一食を勧めず、汁物・サラダ・たんぱく質少量など軽いものや『次の食事で調整』の方向で、無理のない控えめな提案にする。" : "") +
+    (ctx.avoidNames && ctx.avoidNames.length ? `(8) 次の案は出さず別案にする：${ctx.avoidNames.join("、")}。` : "") +
     "励ましや前置きは不要。出力はJSONのみ、コードフェンス禁止。各案に name, kcal, p, f, c, note(30字以内) を入れる。";
   const cookSys = common + (hasIng ? "今ある材料が入力されているので、それを主役にした自炊メニューにする。入力に無い食材は最小限の補助に留める。" : "自炊で作れるメニューにする。");
   const eatoutSys = common + "これは外食・デリバリー(Uber等)向け。具材レシピではなく『どの店種・料理ジャンルで、何を、どう頼むか(ごはん少なめ等の調整を含む)』を提案する。実在店舗名やメニューは断定せず一般的な選び方にする。name は料理や頼み方、note に選び方のコツ。";
@@ -212,7 +234,7 @@ async function suggestMeal(ctx) {
   const u =
     `残り${remain}kcal（${over ? "超過中" : "以内が目安"}）。残りP${ctx.pG - ctx.p}g/F${ctx.fG - ctx.f}g/C${ctx.cG - ctx.c}g。` +
     `今日すでに食べたもの:${(ctx.todayItems && ctx.todayItems.length) ? ctx.todayItems.join("、") : "なし"}。` +
-    `普段の傾向:${ctx.historySummary || "まだデータが少ない"}。体質メモ:${ctx.constitution || "なし"}。好み:${ctx.prefs || "なし"}。` +
+    `普段の傾向:${ctx.historySummary || "まだデータが少ない"}。体質メモ:${ctx.constitution || "なし"}。好み:${ctx.prefs || "なし"}。今日のコンディション:${ctx.condition || "なし"}。` +
     (ctx.mode === "cook" ? `今ある材料(最優先):${ctx.ingredients || "未入力"}。` : "");
   const r = parseJSON(await callClaude(sys, u));
   return r.options || [];
@@ -464,6 +486,7 @@ function App() {
   const [foodLog, setFoodLog] = useState([]);
   const [favorites, setFavorites] = useState([]);
   const [bodyLog, setBodyLog] = useState([]);
+  const [condLog, setCondLog] = useState([]);
   const [chatLog, setChatLog] = useState([]);
   const [onboarded, setOnboarded] = useState(false);
   const saveTimer = useRef(null);
@@ -486,7 +509,7 @@ function App() {
         if (d) {
           setProfile({ ...DEFAULT_PROFILE, ...(d.profile || {}) });
           setFoodLog(d.foodLog || []); setFavorites(d.favorites || []);
-          setBodyLog(d.bodyLog || []); setChatLog(d.chatLog || []);
+          setBodyLog(d.bodyLog || []); setCondLog(d.condLog || []); setChatLog(d.chatLog || []);
           setOnboarded(d.onboarded || false);
         }
         setDataLoaded(true);
@@ -500,10 +523,10 @@ function App() {
     if (!session || !dataLoaded) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      cloudSave(session.user.id, { profile, foodLog, favorites, bodyLog, chatLog: chatLog.slice(-40), onboarded })
+      cloudSave(session.user.id, { profile, foodLog, favorites, bodyLog, condLog, chatLog: chatLog.slice(-40), onboarded })
         .then(() => setSyncErr("")).catch(() => setSyncErr("クラウド保存に失敗しました（通信をご確認ください）。"));
     }, 800);
-  }, [session, dataLoaded, profile, foodLog, favorites, bodyLog, chatLog, onboarded]);
+  }, [session, dataLoaded, profile, foodLog, favorites, bodyLog, condLog, chatLog, onboarded]);
 
   const targets = useMemo(() => computeTargets(profile), [profile]);
   const today = todayKey();
@@ -530,9 +553,9 @@ function App() {
             <PrimaryBtn onClick={() => setScreen("settings")}>設定をひらく</PrimaryBtn>
           </Card>
         )}
-        {screen === "home" && <HomeScreen profile={profile} targets={targets} todaySum={todaySum} today={today} foodLog={foodLog} setFoodLog={setFoodLog} />}
-        {screen === "record" && <RecordScreen today={today} todaySum={todaySum} todayRows={todayRows} setFoodLog={setFoodLog} favorites={favorites} setFavorites={setFavorites} />}
-        {screen === "body" && <BodyScreen bodyLog={bodyLog} setBodyLog={setBodyLog} />}
+        {screen === "home" && <HomeScreen profile={profile} targets={targets} todaySum={todaySum} today={today} foodLog={foodLog} setFoodLog={setFoodLog} condLog={condLog} />}
+        {screen === "record" && <RecordScreen today={today} foodLog={foodLog} setFoodLog={setFoodLog} favorites={favorites} setFavorites={setFavorites} />}
+        {screen === "body" && <BodyScreen today={today} bodyLog={bodyLog} setBodyLog={setBodyLog} condLog={condLog} setCondLog={setCondLog} />}
         {screen === "chat" && <ChatScreen profile={profile} targets={targets} chatLog={chatLog} setChatLog={setChatLog} />}
         {screen === "settings" && <SettingsScreen profile={profile} setProfile={setProfile} targets={targets} email={session.user.email} onDone={() => { setOnboarded(true); setScreen("home"); }} onSignOut={signOutUser} />}
       </div>
@@ -548,7 +571,7 @@ function App() {
 }
 
 /* ===== HOME ===== */
-function HomeScreen({ profile, targets, todaySum, today, foodLog, setFoodLog }) {
+function HomeScreen({ profile, targets, todaySum, today, foodLog, setFoodLog, condLog }) {
   const [point, setPoint] = useState("");
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState("cook");
@@ -561,12 +584,13 @@ function HomeScreen({ profile, targets, todaySum, today, foodLog, setFoodLog }) 
 
   const todayItems = useMemo(() => foodLog.filter((r) => r.date === today).map((r) => r.text), [foodLog, today]);
   const historySummary = useMemo(() => recentSummary(foodLog, today), [foodLog, today]);
+  const condition = useMemo(() => condText((condLog || []).find((c) => c.date === today)), [condLog, today]);
 
-  const baseCtx = { targetKcal: targets.targetKcal, eatenKcal: todaySum.kcal, pG: targets.pG, fG: targets.fG, cG: targets.cG, p: todaySum.p, f: todaySum.f, c: todaySum.c, tone: profile.tone, callName: profile.callName, constitution: profile.constitution, prefs: profile.prefs };
+  const baseCtx = { targetKcal: targets.targetKcal, eatenKcal: todaySum.kcal, pG: targets.pG, fG: targets.fG, cG: targets.cG, p: todaySum.p, f: todaySum.f, c: todaySum.c, tone: profile.tone, callName: profile.callName, constitution: profile.constitution, prefs: profile.prefs, condition };
   const sugCtx = { ...baseCtx, mode, ingredients, todayItems, historySummary };
 
   const refresh = async () => { setLoading(true); try { setPoint(await companionPoint(baseCtx)); } catch { setPoint("ポイントを取得できませんでした（AIを使うには「設定」でAPIキーを登録してください。通信エラーの場合もあります）。記録は続けられます。"); } setLoading(false); };
-  useEffect(() => { refresh(); }, [todaySum.kcal, profile.tone]);
+  useEffect(() => { refresh(); }, [todaySum.kcal, profile.tone, condition]);
 
   const runSuggest = async (reroll) => {
     setSugLoading(true); setRecipes({}); setAddedIdx(null);
@@ -637,19 +661,20 @@ function HomeScreen({ profile, targets, todaySum, today, foodLog, setFoodLog }) 
 }
 
 /* ===== RECORD ===== */
-function RecordScreen({ today, todaySum, todayRows, setFoodLog, favorites, setFavorites }) {
+function RecordScreen({ today, foodLog, setFoodLog, favorites, setFavorites }) {
+  const [selDate, setSelDate] = useState(today);
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
   const [draft, setDraft] = useState(null);
   const [error, setError] = useState("");
-  const blankEntry = () => ({ time: "", name: "", kcal: 0, p: 0, f: 0, c: 0 });
+  const blankEntry = () => ({ time: nowHHMM(), name: "", kcal: 0, p: 0, f: 0, c: 0 });
 
   const estimate = async () => {
     if (!text.trim()) return;
     setLoading(true); setError("");
     try {
       const r = await estimateFood(text.trim());
-      const entries = (r.entries || []).map((e) => ({ time: e.time || "", name: e.name || "", kcal: Math.round(e.kcal || 0), p: Math.round(e.p || 0), f: Math.round(e.f || 0), c: Math.round(e.c || 0) }));
+      const entries = (r.entries || []).map((e) => ({ time: e.time || nowHHMM(), name: e.name || "", kcal: Math.round(e.kcal || 0), p: Math.round(e.p || 0), f: Math.round(e.f || 0), c: Math.round(e.c || 0) }));
       setDraft({ entries: entries.length ? entries : [{ ...blankEntry(), name: text.trim() }], confidence: r.confidence || "medium", note: r.note || "" });
     } catch {
       setDraft({ entries: [{ ...blankEntry(), name: text.trim() }], confidence: "low", note: "自動推定に失敗しました。数値を手で入力してください。" });
@@ -660,9 +685,9 @@ function RecordScreen({ today, todaySum, todayRows, setFoodLog, favorites, setFa
   const editEntry = (i, k, v) => setDraft((d) => ({ ...d, entries: d.entries.map((e, idx) => idx === i ? { ...e, [k]: (k === "name" || k === "time") ? v : (v === "" ? "" : Math.max(0, +v)) } : e) }));
   const removeEntry = (i) => setDraft((d) => ({ ...d, entries: d.entries.filter((_, idx) => idx !== i) }));
   const addEntry = () => setDraft((d) => ({ ...d, entries: [...d.entries, blankEntry()] }));
-  const confirmAll = () => { const rows = draft.entries.map((e, i) => ({ id: Date.now() + i, date: today, time: e.time || nowHHMM(), text: e.name || "（無題）", kcal: +e.kcal || 0, p: +e.p || 0, f: +e.f || 0, c: +e.c || 0 })); setFoodLog((prev) => [...rows, ...prev]); setDraft(null); setText(""); setError(""); };
+  const confirmAll = () => { const rows = draft.entries.map((e, i) => ({ id: Date.now() + i, date: selDate, time: e.time || nowHHMM(), text: e.name || "（無題）", kcal: +e.kcal || 0, p: +e.p || 0, f: +e.f || 0, c: +e.c || 0 })); setFoodLog((prev) => [...rows, ...prev]); setDraft(null); setText(""); setError(""); };
   const saveFav = (e) => setFavorites((prev) => [{ name: (e.name || "").slice(0, 18), kcal: +e.kcal || 0, p: +e.p || 0, f: +e.f || 0, c: +e.c || 0 }, ...prev].slice(0, 24));
-  const addFav = (fav) => setFoodLog((prev) => [{ id: Date.now(), date: today, time: nowHHMM(), text: fav.name, ...fav }, ...prev]);
+  const addFav = (fav) => setFoodLog((prev) => [{ id: Date.now(), date: selDate, time: nowHHMM(), text: fav.name, ...fav }, ...prev]);
   const del = (id) => setFoodLog((prev) => prev.filter((r) => r.id !== id));
 
   const [editId, setEditId] = useState(null);
@@ -674,13 +699,25 @@ function RecordScreen({ today, todaySum, todayRows, setFoodLog, favorites, setFa
 
   const confColor = { high: C.carb, medium: C.fat, low: C.protein };
   const confLabel = { high: "推定の自信：高", medium: "推定の自信：中", low: "推定の自信：低" };
-  const sortedToday = [...todayRows].sort((a, b) => (a.time || "99:99").localeCompare(b.time || "99:99"));
+  const selRows = foodLog.filter((r) => r.date === selDate);
+  const selSum = sumLog(selRows);
+  const sortedRows = [...selRows].sort((a, b) => (a.time || "99:99").localeCompare(b.time || "99:99"));
+  const isToday = selDate === today;
 
   return (
     <>
+      <Card style={{ marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px" }}>
+        <button onClick={() => { setSelDate(shiftDate(selDate, -1)); setDraft(null); setEditId(null); }} style={{ border: "none", background: C.surfaceAlt, borderRadius: 10, width: 38, height: 38, cursor: "pointer", color: C.ink, fontSize: 18 }}>‹</button>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontFamily: FONT_DISP, fontSize: 16 }}>{isToday ? "今日" : fmtDateFull(selDate)}</div>
+          {!isToday && <button onClick={() => setSelDate(today)} style={{ border: "none", background: "none", color: C.moss, fontSize: 11, cursor: "pointer", marginTop: 2 }}>今日へ戻る</button>}
+        </div>
+        <button onClick={() => { if (!isToday) { setSelDate(shiftDate(selDate, 1)); setDraft(null); setEditId(null); } }} disabled={isToday} style={{ border: "none", background: isToday ? "transparent" : C.surfaceAlt, borderRadius: 10, width: 38, height: 38, cursor: isToday ? "default" : "pointer", color: isToday ? C.inkFaint : C.ink, fontSize: 18 }}>›</button>
+      </Card>
+
       <Card style={{ marginBottom: 14 }}>
         <Eyebrow>食べたものを記録</Eyebrow>
-        <div style={{ fontSize: 12.5, color: C.inkSoft, margin: "8px 0 10px", lineHeight: 1.6 }}>テキストで送ると概算します。<b>9:00 / 12:00</b> のように時刻を書けば、その通りタイミングごとに分けて記録します。数値は下書きなので、直してから確定できます。</div>
+        <div style={{ fontSize: 12.5, color: C.inkSoft, margin: "8px 0 10px", lineHeight: 1.6 }}>テキストで送ると概算します。<b>9:00 / 12:00</b> のように時刻を書けば、その通りタイミングごとに分けて記録します。時刻を書かなければ、いまの時刻が自動で入ります（あとで直せます）。</div>
         <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} placeholder={"例（まとめ書き）：\n9:00 トーストとゆで卵、コーヒー\n12:30 鮭弁当\n19:00 サラダと鶏むね"} style={{ ...inputStyle, resize: "none" }} />
         <PrimaryBtn onClick={estimate} disabled={loading || !text.trim()} style={{ marginTop: 10 }}>{loading ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Send size={15} />} 概算する</PrimaryBtn>
         {error && <div style={{ fontSize: 12, color: C.protein, marginTop: 8 }}>{error}</div>}
@@ -729,13 +766,13 @@ function RecordScreen({ today, todaySum, todayRows, setFoodLog, favorites, setFa
 
       <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <Eyebrow>今日の記録</Eyebrow><span style={{ fontSize: 12, color: C.inkSoft }}>合計 {Math.round(todaySum.kcal)} kcal</span>
+          <Eyebrow>{isToday ? "今日の記録" : `${fmtDate(selDate)} の記録`}</Eyebrow><span style={{ fontSize: 12, color: C.inkSoft }}>合計 {Math.round(selSum.kcal)} kcal</span>
         </div>
-        {sortedToday.length === 0 ? (
+        {sortedRows.length === 0 ? (
           <div style={{ fontSize: 13, color: C.inkFaint, padding: "18px 0", textAlign: "center" }}>まだ記録がありません。上から最初の一品を。</div>
         ) : (
           <div style={{ marginTop: 10 }}>
-            {sortedToday.map((r) => editId === r.id ? (
+            {sortedRows.map((r) => editId === r.id ? (
               <div key={r.id} style={{ borderTop: `1px solid ${C.line}`, paddingTop: 12, marginTop: 12 }}>
                 <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
                   <input type="time" value={editVals.time} onChange={(ev) => editVal("time", ev.target.value)} style={{ ...inputStyle, width: 120, padding: "8px 10px" }} />
@@ -770,11 +807,17 @@ function RecordScreen({ today, todaySum, todayRows, setFoodLog, favorites, setFa
 }
 
 /* ===== BODY ===== */
-function BodyScreen({ bodyLog, setBodyLog }) {
+function BodyScreen({ today, bodyLog, setBodyLog, condLog, setCondLog }) {
   const [date, setDate] = useState(todayKey());
   const [weight, setWeight] = useState("");
   const [bodyFat, setBodyFat] = useState("");
   const add = () => { if (!weight) return; setBodyLog((prev) => { const without = prev.filter((r) => r.date !== date); return [...without, { date, weight: +weight, bodyFat: bodyFat ? +bodyFat : null }].sort((a, b) => a.date.localeCompare(b.date)); }); setWeight(""); setBodyFat(""); };
+
+  const [condDate, setCondDate] = useState(today);
+  const cur = (condLog || []).find((r) => r.date === condDate) || { date: condDate, poop: 0 };
+  const condToday = condDate === today;
+  const updateCond = (patch) => setCondLog((prev) => { const without = (prev || []).filter((r) => r.date !== condDate); const base = (prev || []).find((r) => r.date === condDate) || { date: condDate, poop: 0 }; return [...without, { ...base, ...patch }].sort((a, b) => a.date.localeCompare(b.date)); });
+  const sh = sleepHours(cur.sleepFrom, cur.sleepTo);
   const data = bodyLog.map((r) => ({ ...r, label: fmtDate(r.date) }));
   const latest = bodyLog[bodyLog.length - 1], first = bodyLog[0];
   const delta = latest && first ? (latest.weight - first.weight).toFixed(1) : null;
@@ -790,6 +833,44 @@ function BodyScreen({ bodyLog, setBodyLog }) {
           <label style={{ fontSize: 11, color: C.inkSoft }}>体脂肪率 (%)<input type="number" step="0.1" value={bodyFat} onChange={(e) => setBodyFat(e.target.value)} placeholder="任意" style={{ ...inputStyle, marginTop: 4 }} /></label>
         </div>
         <PrimaryBtn onClick={add} disabled={!weight} style={{ marginTop: 12 }}><Check size={16} /> この日の記録を保存</PrimaryBtn>
+      </Card>
+
+      <Card style={{ marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <Eyebrow>コンディション</Eyebrow>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button onClick={() => setCondDate(shiftDate(condDate, -1))} style={{ border: "none", background: C.surfaceAlt, borderRadius: 8, width: 28, height: 28, cursor: "pointer", color: C.ink }}>‹</button>
+            <span style={{ fontSize: 12, color: C.inkSoft, minWidth: 84, textAlign: "center" }}>{condToday ? "今日" : fmtDateFull(condDate)}</span>
+            <button onClick={() => { if (!condToday) setCondDate(shiftDate(condDate, 1)); }} disabled={condToday} style={{ border: "none", background: condToday ? "transparent" : C.surfaceAlt, borderRadius: 8, width: 28, height: 28, cursor: condToday ? "default" : "pointer", color: condToday ? C.inkFaint : C.ink }}>›</button>
+          </div>
+        </div>
+
+        <div style={{ fontSize: 11.5, fontWeight: 700, color: C.inkSoft, marginBottom: 6 }}>睡眠</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <label style={{ fontSize: 11, color: C.inkSoft }}>就寝<input type="time" value={cur.sleepFrom || ""} onChange={(e) => updateCond({ sleepFrom: e.target.value })} style={{ ...inputStyle, marginTop: 4 }} /></label>
+          <label style={{ fontSize: 11, color: C.inkSoft }}>起床<input type="time" value={cur.sleepTo || ""} onChange={(e) => updateCond({ sleepTo: e.target.value })} style={{ ...inputStyle, marginTop: 4 }} /></label>
+        </div>
+        {sh != null && <div style={{ fontSize: 12, color: C.moss, marginTop: 6 }}>睡眠時間：約 {sh} 時間</div>}
+        <div style={{ fontSize: 11, color: C.inkSoft, margin: "10px 0 6px" }}>寝起きの感じ</div>
+        <Segmented value={cur.wake || ""} onChange={(v) => updateCond({ wake: v })} options={[{ v: "fresh", l: "すっきり" }, { v: "normal", l: "ふつう" }, { v: "tired", l: "だるい" }]} />
+
+        <div style={{ height: 1, background: C.line, margin: "16px 0" }} />
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: C.inkSoft }}>お通じ <span style={{ color: C.inkFaint, fontWeight: 400 }}>本日 {cur.poop || 0} 回</span></div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {(cur.poop || 0) > 0 && <button onClick={() => updateCond({ poop: Math.max(0, (cur.poop || 0) - 1) })} style={{ border: `1px solid ${C.line}`, background: C.surface, borderRadius: 10, padding: "8px 12px", fontSize: 13, cursor: "pointer", color: C.inkSoft, fontFamily: FONT_BODY }}>−1</button>}
+            <button onClick={() => updateCond({ poop: (cur.poop || 0) + 1 })} style={{ border: "none", background: C.moss, color: "#fff", borderRadius: 10, padding: "8px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: FONT_BODY, display: "inline-flex", alignItems: "center", gap: 5 }}><Check size={14} /> 出た</button>
+          </div>
+        </div>
+
+        <div style={{ height: 1, background: C.line, margin: "16px 0" }} />
+
+        <Field label="運動（任意）"><input value={cur.exercise || ""} onChange={(e) => updateCond({ exercise: e.target.value })} placeholder="例：ウォーキング30分、筋トレ" style={inputStyle} /></Field>
+        <div style={{ marginTop: 12 }}>
+          <Field label="その他メモ（体調など・任意）"><textarea value={cur.memo || ""} onChange={(e) => updateCond({ memo: e.target.value })} rows={2} placeholder="例：お腹が張っている／風邪気味" style={{ ...inputStyle, resize: "none" }} /></Field>
+        </div>
+        <div style={{ fontSize: 11, color: C.inkFaint, marginTop: 10, lineHeight: 1.6 }}>ここに記録した内容は、ホームのメニュー提案にも反映されます。</div>
       </Card>
 
       <Card>
