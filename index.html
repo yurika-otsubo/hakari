@@ -99,10 +99,10 @@ const TONES = { warm: { label: "寄り添い" }, plain: { label: "事務的" } }
 
 const todayKey = () => new Date().toISOString().slice(0, 10);
 const nowHHMM = () => new Date().toTimeString().slice(0, 5);
-const fmtDate = (k) => { const d = new Date(k + "T00:00:00Z"); return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`; };
+const fmtDate = (k) => { const d = new Date(k + "T00:00:00"); return `${d.getMonth() + 1}/${d.getDate()}`; };
 const WD = ["日", "月", "火", "水", "木", "金", "土"];
-const fmtDateFull = (k) => { const d = new Date(k + "T00:00:00Z"); return `${d.getUTCMonth() + 1}月${d.getUTCDate()}日(${WD[d.getUTCDay()]})`; };
-const shiftDate = (k, delta) => { const d = new Date(k + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + delta); return d.toISOString().slice(0, 10); };
+const fmtDateFull = (k) => { const d = new Date(k + "T00:00:00"); return `${d.getMonth() + 1}月${d.getDate()}日(${WD[d.getDay()]})`; };
+const shiftDate = (k, delta) => { const d = new Date(k + "T00:00:00"); d.setDate(d.getDate() + delta); return d.toISOString().slice(0, 10); };
 function sleepHours(from, to) {
   if (!from || !to) return null;
   const [fh, fm] = from.split(":").map(Number), [th, tm] = to.split(":").map(Number);
@@ -706,13 +706,13 @@ function RecordScreen({ today, foodLog, setFoodLog, favorites, setFavorites }) {
 
   return (
     <>
-      <Card style={{ marginBottom: 14 }}>
-        <Eyebrow>記録する日</Eyebrow>
-        <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
-          <input type="date" value={selDate} max={today} onChange={(e) => { if (e.target.value) { setSelDate(e.target.value); setDraft(null); setEditId(null); } }} style={{ ...inputStyle, flex: 1 }} />
-          {!isToday && <GhostBtn onClick={() => { setSelDate(today); setDraft(null); setEditId(null); }} style={{ width: "auto" }}>今日</GhostBtn>}
+      <Card style={{ marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px" }}>
+        <button onClick={() => { setSelDate(shiftDate(selDate, -1)); setDraft(null); setEditId(null); }} style={{ border: "none", background: C.surfaceAlt, borderRadius: 10, width: 38, height: 38, cursor: "pointer", color: C.ink, fontSize: 18 }}>‹</button>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontFamily: FONT_DISP, fontSize: 16 }}>{isToday ? "今日" : fmtDateFull(selDate)}</div>
+          {!isToday && <button onClick={() => setSelDate(today)} style={{ border: "none", background: "none", color: C.moss, fontSize: 11, cursor: "pointer", marginTop: 2 }}>今日へ戻る</button>}
         </div>
-        {!isToday && <div style={{ fontSize: 11.5, color: C.inkSoft, marginTop: 8 }}>{fmtDateFull(selDate)} の記録を表示・追加しています。</div>}
+        <button onClick={() => { if (!isToday) { setSelDate(shiftDate(selDate, 1)); setDraft(null); setEditId(null); } }} disabled={isToday} style={{ border: "none", background: isToday ? "transparent" : C.surfaceAlt, borderRadius: 10, width: 38, height: 38, cursor: isToday ? "default" : "pointer", color: isToday ? C.inkFaint : C.ink, fontSize: 18 }}>›</button>
       </Card>
 
       <Card style={{ marginBottom: 14 }}>
@@ -836,11 +836,12 @@ function BodyScreen({ today, bodyLog, setBodyLog, condLog, setCondLog }) {
       </Card>
 
       <Card style={{ marginBottom: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
           <Eyebrow>コンディション</Eyebrow>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <input type="date" value={condDate} max={today} onChange={(e) => { if (e.target.value) setCondDate(e.target.value); }} style={{ ...inputStyle, width: "auto", padding: "7px 10px", fontSize: 13 }} />
-            {!condToday && <GhostBtn onClick={() => setCondDate(today)} style={{ width: "auto", padding: "7px 12px" }}>今日</GhostBtn>}
+            <button onClick={() => setCondDate(shiftDate(condDate, -1))} style={{ border: "none", background: C.surfaceAlt, borderRadius: 8, width: 28, height: 28, cursor: "pointer", color: C.ink }}>‹</button>
+            <span style={{ fontSize: 12, color: C.inkSoft, minWidth: 84, textAlign: "center" }}>{condToday ? "今日" : fmtDateFull(condDate)}</span>
+            <button onClick={() => { if (!condToday) setCondDate(shiftDate(condDate, 1)); }} disabled={condToday} style={{ border: "none", background: condToday ? "transparent" : C.surfaceAlt, borderRadius: 8, width: 28, height: 28, cursor: condToday ? "default" : "pointer", color: condToday ? C.inkFaint : C.ink }}>›</button>
           </div>
         </div>
 
