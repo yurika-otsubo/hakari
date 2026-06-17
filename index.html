@@ -99,10 +99,10 @@ const TONES = { warm: { label: "寄り添い" }, plain: { label: "事務的" } }
 
 const todayKey = () => new Date().toISOString().slice(0, 10);
 const nowHHMM = () => new Date().toTimeString().slice(0, 5);
-const fmtDate = (k) => { const d = new Date(k + "T00:00:00"); return `${d.getMonth() + 1}/${d.getDate()}`; };
+const fmtDate = (k) => { const d = new Date(k + "T00:00:00Z"); return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`; };
 const WD = ["日", "月", "火", "水", "木", "金", "土"];
-const fmtDateFull = (k) => { const d = new Date(k + "T00:00:00"); return `${d.getMonth() + 1}月${d.getDate()}日(${WD[d.getDay()]})`; };
-const shiftDate = (k, delta) => { const d = new Date(k + "T00:00:00"); d.setDate(d.getDate() + delta); return d.toISOString().slice(0, 10); };
+const fmtDateFull = (k) => { const d = new Date(k + "T00:00:00Z"); return `${d.getUTCMonth() + 1}月${d.getUTCDate()}日(${WD[d.getUTCDay()]})`; };
+const shiftDate = (k, delta) => { const d = new Date(k + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + delta); return d.toISOString().slice(0, 10); };
 function sleepHours(from, to) {
   if (!from || !to) return null;
   const [fh, fm] = from.split(":").map(Number), [th, tm] = to.split(":").map(Number);
@@ -261,7 +261,8 @@ async function chatReply(profile, targets, history) {
 /* ===== supabase (cloud + auth) ===== */
 const SB_URL = "https://wwzlptnuiedsiwrltoxf.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind3emxwdG51aWVkc2l3cmx0b3hmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1MDc4MzIsImV4cCI6MjA5NzA4MzgzMn0.U21uYswBbchGZJLhbW50W-2-DtEE5MgNQ62ThchmTKg";
-const sb = window.supabase.createClient(SB_URL, SB_KEY);
+let sb = null;
+try { if (window.supabase && window.supabase.createClient) sb = window.supabase.createClient(SB_URL, SB_KEY); } catch (e) { sb = null; }
 
 async function signInGoogle() { await sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } }); }
 async function signOutUser() { await sb.auth.signOut(); }
@@ -706,13 +707,13 @@ function RecordScreen({ today, foodLog, setFoodLog, favorites, setFavorites }) {
 
   return (
     <>
-      <Card style={{ marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px" }}>
-        <button onClick={() => { setSelDate(shiftDate(selDate, -1)); setDraft(null); setEditId(null); }} style={{ border: "none", background: C.surfaceAlt, borderRadius: 10, width: 38, height: 38, cursor: "pointer", color: C.ink, fontSize: 18 }}>‹</button>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontFamily: FONT_DISP, fontSize: 16 }}>{isToday ? "今日" : fmtDateFull(selDate)}</div>
-          {!isToday && <button onClick={() => setSelDate(today)} style={{ border: "none", background: "none", color: C.moss, fontSize: 11, cursor: "pointer", marginTop: 2 }}>今日へ戻る</button>}
+      <Card style={{ marginBottom: 14 }}>
+        <Eyebrow>記録する日</Eyebrow>
+        <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
+          <input type="date" value={selDate} max={today} onChange={(e) => { if (e.target.value) { setSelDate(e.target.value); setDraft(null); setEditId(null); } }} style={{ ...inputStyle, flex: 1 }} />
+          {!isToday && <GhostBtn onClick={() => { setSelDate(today); setDraft(null); setEditId(null); }} style={{ width: "auto" }}>今日</GhostBtn>}
         </div>
-        <button onClick={() => { if (!isToday) { setSelDate(shiftDate(selDate, 1)); setDraft(null); setEditId(null); } }} disabled={isToday} style={{ border: "none", background: isToday ? "transparent" : C.surfaceAlt, borderRadius: 10, width: 38, height: 38, cursor: isToday ? "default" : "pointer", color: isToday ? C.inkFaint : C.ink, fontSize: 18 }}>›</button>
+        {!isToday && <div style={{ fontSize: 11.5, color: C.inkSoft, marginTop: 8 }}>{fmtDateFull(selDate)} の記録を表示・追加しています。</div>}
       </Card>
 
       <Card style={{ marginBottom: 14 }}>
@@ -836,12 +837,11 @@ function BodyScreen({ today, bodyLog, setBodyLog, condLog, setCondLog }) {
       </Card>
 
       <Card style={{ marginBottom: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 8, flexWrap: "wrap" }}>
           <Eyebrow>コンディション</Eyebrow>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button onClick={() => setCondDate(shiftDate(condDate, -1))} style={{ border: "none", background: C.surfaceAlt, borderRadius: 8, width: 28, height: 28, cursor: "pointer", color: C.ink }}>‹</button>
-            <span style={{ fontSize: 12, color: C.inkSoft, minWidth: 84, textAlign: "center" }}>{condToday ? "今日" : fmtDateFull(condDate)}</span>
-            <button onClick={() => { if (!condToday) setCondDate(shiftDate(condDate, 1)); }} disabled={condToday} style={{ border: "none", background: condToday ? "transparent" : C.surfaceAlt, borderRadius: 8, width: 28, height: 28, cursor: condToday ? "default" : "pointer", color: condToday ? C.inkFaint : C.ink }}>›</button>
+            <input type="date" value={condDate} max={today} onChange={(e) => { if (e.target.value) setCondDate(e.target.value); }} style={{ ...inputStyle, width: "auto", padding: "7px 10px", fontSize: 13 }} />
+            {!condToday && <GhostBtn onClick={() => setCondDate(today)} style={{ width: "auto", padding: "7px 12px" }}>今日</GhostBtn>}
           </div>
         </div>
 
@@ -1042,7 +1042,40 @@ function SettingsScreen({ profile, setProfile, targets, onDone, email, onSignOut
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+class ErrorBoundary extends React.Component {
+  constructor(p) { super(p); this.state = { err: null }; }
+  static getDerivedStateFromError(err) { return { err }; }
+  componentDidCatch() {}
+  render() {
+    if (this.state.err) {
+      return (
+        <div style={{ fontFamily: FONT_BODY, background: C.canvas, color: C.ink, minHeight: "100vh", padding: 24, boxSizing: "border-box" }}>
+          <div style={{ fontFamily: FONT_DISP, fontSize: 24, letterSpacing: 3, marginBottom: 10 }}>{APP_NAME}</div>
+          <div style={{ fontSize: 14, lineHeight: 1.7, color: C.inkSoft, marginBottom: 14 }}>読み込み中に問題が発生しました。まず「再読み込み」を試してください。直らない場合は、下のメッセージを開発者に伝えてください（記録はクラウドに保存されているので消えていません）。</div>
+          <button onClick={() => location.reload()} style={{ background: C.moss, color: "#fff", border: "none", borderRadius: 12, padding: "12px 16px", fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: FONT_BODY }}>再読み込み</button>
+          <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 11, color: C.protein, background: C.surface, border: `1px solid ${C.line}`, borderRadius: 10, padding: 12, marginTop: 16, overflow: "auto" }}>{String(this.state.err && (this.state.err.stack || this.state.err.message || this.state.err))}</pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+function FatalScreen({ msg }) {
+  return (
+    <div style={{ fontFamily: FONT_BODY, background: C.canvas, color: C.ink, minHeight: "100vh", padding: 24, boxSizing: "border-box", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+      <div style={{ fontFamily: FONT_DISP, fontSize: 26, letterSpacing: 3, marginBottom: 12 }}>{APP_NAME}</div>
+      <div style={{ fontSize: 14, lineHeight: 1.8, color: C.inkSoft, marginBottom: 16 }}>{msg}</div>
+      <button onClick={() => location.reload()} style={{ background: C.moss, color: "#fff", border: "none", borderRadius: 12, padding: "12px 16px", fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: FONT_BODY, alignSelf: "flex-start" }}>再読み込み</button>
+    </div>
+  );
+}
+
+const _root = ReactDOM.createRoot(document.getElementById("root"));
+_root.render(
+  <ErrorBoundary>
+    {sb ? <App /> : <FatalScreen msg="接続部品の読み込みに失敗しました。通信環境を確認して、しばらくしてから再読み込みしてください。" />}
+  </ErrorBoundary>
+);
 </script>
 <script>
 /* ホーム画面アイコンを実行時に生成（単一ファイルを保つため） */
