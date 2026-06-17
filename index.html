@@ -62,6 +62,7 @@ const ICONS = {
   chef: ["M7 19h10", "M8 19v-3", "M16 19v-3", "M8 16c-2.5 0-4-1.8-4-4 0-2.2 1.8-3.7 3.7-3.5C8.1 6.5 9.9 5 12 5s3.9 1.5 4.3 3.5C18.2 8.3 20 9.8 20 12c0 2.2-1.5 4-4 4z"],
   pencil: ["M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z", "M14 5l3 3"],
   loader: ["M12 3a9 9 0 1 0 9 9"],
+  camera: ["M3 8a2 2 0 0 1 2-2h2l1.5-2h5L17 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z", "M12 16a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z"],
 };
 function Icon({ name, size = 18, strokeWidth = 1.8, color = "currentColor", style }) {
   return (
@@ -85,6 +86,7 @@ const X = (p) => <Icon name="x" {...p} />;
 const ChefHat = (p) => <Icon name="chef" {...p} />;
 const Pencil = (p) => <Icon name="pencil" {...p} />;
 const Loader2 = (p) => <Icon name="loader" {...p} />;
+const Camera = (p) => <Icon name="camera" {...p} />;
 
 /* ===== constants ===== */
 const ACTIVITIES = [
@@ -181,6 +183,25 @@ function parseJSON(text) {
 const toneNoteOf = (t) => t === "warm" ? "やわらかく寄り添う口調。ですます調。" : "事務的で簡潔な口調。ですます調は保つ。絵文字なし。";
 const callNameNote = (n) => n ? `ユーザーの呼び方は「${n}」。ユーザーを指すときはこの呼称を使う。` : "ユーザーへの特定の呼称は使わず、自然な文にする。";
 
+async function estimateLabel(base64, mediaType) {
+  if (!API_KEY) throw new Error("NO_KEY");
+  const sys = "あなたは栄養成分表示ラベルの読み取りアシスタント。画像の栄養成分表示から、エネルギー(kcal)・たんぱく質(p,g)・脂質(f,g)・炭水化物(c,g)を読み取る。炭水化物が糖質＋食物繊維に分かれて表示されている場合は合計してcにする。表示単位(100gあたり/1食あたり/1袋あたり等)があれば name か note に明記する。読み取れない項目は0にしてnoteに記す。出力はJSONのみ、コードフェンス禁止。" +
+    'スキーマ:{"entries":[{"time":"","name":string,"kcal":number,"p":number,"f":number,"c":number}],"confidence":"high"|"medium"|"low","note":string}';
+  const res = await fetch(API_URL, {
+    method: "POST", headers: aiHeaders(),
+    body: JSON.stringify({
+      model: MODEL, max_tokens: 1024, system: sys,
+      messages: [{ role: "user", content: [
+        { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
+        { type: "text", text: "この栄養成分表示を読み取って、表示どおりの数値を返してください。" },
+      ] }],
+    }),
+  });
+  if (!res.ok) throw new Error("API " + res.status);
+  const data = await res.json();
+  const text = data.content.filter((b) => b.type === "text").map((b) => b.text).join("\n");
+  return parseJSON(text);
+}
 async function estimateFood(text) {
   const sys = "あなたは日本語の栄養推定アシスタント。ユーザーが食べたものの説明から推定する。入力に複数の食事や時刻(例 9:00、12:30 など)が含まれる場合は、食事ごと・時刻ごとに分割して entries 配列にする。時刻が書かれていれば time に HH:MM 形式で入れ、書かれていなければ time は空文字。各 entry に kcal,p(たんぱく質g),f(脂質g),c(炭水化物g) を入れる。量が不明なら一般的な1人前を仮定し、noteに仮定内容を簡潔に書く。出力はJSONのみ。前置き・説明・マークダウン・コードフェンス禁止。" +
     'スキーマ:{"entries":[{"time":string,"name":string,"kcal":number,"p":number,"f":number,"c":number}],"confidence":"high"|"medium"|"low","note":string}';
@@ -224,8 +245,10 @@ async function suggestMeal(ctx) {
     "(4) 残りのPFCに沿う（炭水化物が多い日は主食控えめでたんぱく質寄り等）。" +
     "(5) 好みは方向性の参考。好みの食材を毎回主役にしない。" +
     "(6) 『今日のコンディション』があれば反映する（お腹が張る→消化に優しく、風邪気味→温かくたんぱく質とビタミン、運動した日→たんぱく質多め、睡眠不足→重すぎない等）。" +
-    (over ? "(7) 【重要】今日はすでにカロリー超過。重い一食を勧めず、汁物・サラダ・たんぱく質少量など軽いものや『次の食事で調整』の方向で、無理のない控えめな提案にする。" : "") +
-    (ctx.avoidNames && ctx.avoidNames.length ? `(8) 次の案は出さず別案にする：${ctx.avoidNames.join("、")}。` : "") +
+    "(7) 『食べたい気分・要望』(お菓子/ジャンク/揚げ物/酸っぱい/さっぱり/温かい等)があれば、頭ごなしに否定せず程よく取り入れる。我慢ゼロか暴食かの二択にせず、残り枠に収まる量・形に落として希望を満たす（例：チョコが欲しい→高カカオを少量＋たんぱく質を添える、ジャンク気分→揚げずに作る/小サイズ＋野菜、酸っぱい→酢の物やレモン、さっぱり→冷菜や和え物）。食べ過ぎが課題なので大量摂取は勧めない。" +
+    "(8) 特定の欲求には栄養面の小ネタを note か tip に軽く添えてよい（例：チョコが欲しい→鉄分やマグネシウム不足のサインのことがある／しょっぱい物→ストレスや発汗の可能性）。ただし断定せず『〜のことがあります』程度に。" +
+    (over ? "(9) 【重要】今日はすでにカロリー超過。重い一食を勧めず、汁物・サラダ・たんぱく質少量など軽いものや『次の食事で調整』の方向で、無理のない控えめな提案にする。" : "") +
+    (ctx.avoidNames && ctx.avoidNames.length ? `(10) 次の案は出さず別案にする：${ctx.avoidNames.join("、")}。` : "") +
     "励ましや前置きは不要。出力はJSONのみ、コードフェンス禁止。各案に name, kcal, p, f, c, note(30字以内) を入れる。";
   const cookSys = common + (hasIng ? "今ある材料が入力されているので、それを主役にした自炊メニューにする。入力に無い食材は最小限の補助に留める。" : "自炊で作れるメニューにする。");
   const eatoutSys = common + "これは外食・デリバリー(Uber等)向け。具材レシピではなく『どの店種・料理ジャンルで、何を、どう頼むか(ごはん少なめ等の調整を含む)』を提案する。実在店舗名やメニューは断定せず一般的な選び方にする。name は料理や頼み方、note に選び方のコツ。";
@@ -234,7 +257,7 @@ async function suggestMeal(ctx) {
   const u =
     `残り${remain}kcal（${over ? "超過中" : "以内が目安"}）。残りP${ctx.pG - ctx.p}g/F${ctx.fG - ctx.f}g/C${ctx.cG - ctx.c}g。` +
     `今日すでに食べたもの:${(ctx.todayItems && ctx.todayItems.length) ? ctx.todayItems.join("、") : "なし"}。` +
-    `普段の傾向:${ctx.historySummary || "まだデータが少ない"}。体質メモ:${ctx.constitution || "なし"}。好み:${ctx.prefs || "なし"}。今日のコンディション:${ctx.condition || "なし"}。` +
+    `普段の傾向:${ctx.historySummary || "まだデータが少ない"}。体質メモ:${ctx.constitution || "なし"}。好み:${ctx.prefs || "なし"}。今日のコンディション:${ctx.condition || "なし"}。食べたい気分・要望:${ctx.craving || "特になし"}。` +
     (ctx.mode === "cook" ? `今ある材料(最優先):${ctx.ingredients || "未入力"}。` : "");
   const r = parseJSON(await callClaude(sys, u));
   return r.options || [];
@@ -250,7 +273,7 @@ async function getRecipe(ctx, mealName, mode) {
     '出力はJSONのみ、コードフェンス禁止。スキーマ:{"title":string,"servings":number,"ingredients":[{"item":string,"amount":string}],"steps":[string],"kcal":number,"p":number,"f":number,"c":number,"tip":string}';
   const u = `メニュー:${mealName}。1人前が残り${ctx.targetKcal - ctx.eatenKcal}kcal以内が目安。` +
     (mode === "cook" ? `今ある材料(最優先で使う):${ctx.ingredients || "未入力"}。` : "") +
-    `好み(参考程度):${ctx.prefs || "なし"}。体質メモ:${ctx.constitution || "なし"}。`;
+    `好み(参考程度):${ctx.prefs || "なし"}。体質メモ:${ctx.constitution || "なし"}。食べたい気分・要望:${ctx.craving || "特になし"}。`;
   return parseJSON(await callClaude(mode === "eatout" ? eatoutSys : cookSys, u, 1500));
 }
 async function chatReply(profile, targets, history) {
@@ -577,6 +600,7 @@ function HomeScreen({ profile, targets, todaySum, today, foodLog, setFoodLog, co
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState("cook");
   const [ingredients, setIngredients] = useState("");
+  const [craving, setCraving] = useState("");
   const [options, setOptions] = useState(null);
   const [sugLoading, setSugLoading] = useState(false);
   const [recipes, setRecipes] = useState({});
@@ -588,7 +612,7 @@ function HomeScreen({ profile, targets, todaySum, today, foodLog, setFoodLog, co
   const condition = useMemo(() => condText((condLog || []).find((c) => c.date === today)), [condLog, today]);
 
   const baseCtx = { targetKcal: targets.targetKcal, eatenKcal: todaySum.kcal, pG: targets.pG, fG: targets.fG, cG: targets.cG, p: todaySum.p, f: todaySum.f, c: todaySum.c, tone: profile.tone, callName: profile.callName, constitution: profile.constitution, prefs: profile.prefs, condition };
-  const sugCtx = { ...baseCtx, mode, ingredients, todayItems, historySummary };
+  const sugCtx = { ...baseCtx, mode, ingredients, craving, todayItems, historySummary };
 
   const refresh = async () => { setLoading(true); try { setPoint(await companionPoint(baseCtx)); } catch { setPoint("ポイントを取得できませんでした（AIを使うには「設定」でAPIキーを登録してください。通信エラーの場合もあります）。記録は続けられます。"); } setLoading(false); };
   useEffect(() => { refresh(); }, [todaySum.kcal, profile.tone, condition]);
@@ -638,6 +662,7 @@ function HomeScreen({ profile, targets, todaySum, today, foodLog, setFoodLog, co
           <Segmented value={mode} onChange={(v) => { setMode(v); setOptions(null); setRecipes({}); }} options={[{ v: "cook", l: "自炊" }, { v: "eatout", l: "外食・デリバリー" }]} />
         </div>
         {mode === "cook" && <input value={ingredients} onChange={(e) => setIngredients(e.target.value)} placeholder="今ある材料（例：鶏むね、豆腐、トマト）任意" style={inputStyle} />}
+        <input value={craving} onChange={(e) => setCraving(e.target.value)} placeholder="気分・食べたいもの（例：チョコ／揚げ物／さっぱり）任意" style={{ ...inputStyle, marginTop: 8 }} />
         <PrimaryBtn onClick={() => runSuggest(false)} disabled={sugLoading} style={{ marginTop: 10 }}>{sugLoading ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Sparkles size={16} />} 提案する</PrimaryBtn>
         {options && options.length > 0 && (
           <>
@@ -668,7 +693,27 @@ function RecordScreen({ today, foodLog, setFoodLog, favorites, setFavorites }) {
   const [loading, setLoading] = useState(false);
   const [draft, setDraft] = useState(null);
   const [error, setError] = useState("");
+  const fileRef = useRef(null);
+  const [photoLoading, setPhotoLoading] = useState(false);
   const blankEntry = () => ({ time: nowHHMM(), name: "", kcal: 0, p: 0, f: 0, c: 0 });
+
+  const onPhoto = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    setPhotoLoading(true); setError("");
+    try {
+      const dataUrl = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(file); });
+      const base64 = String(dataUrl).split(",")[1];
+      const mt = file.type || "image/jpeg";
+      const r = await estimateLabel(base64, mt);
+      const entries = (r.entries || []).map((en) => ({ time: en.time || nowHHMM(), name: en.name || "", kcal: Math.round(en.kcal || 0), p: Math.round(en.p || 0), f: Math.round(en.f || 0), c: Math.round(en.c || 0) }));
+      setDraft({ entries: entries.length ? entries : [{ ...blankEntry() }], confidence: r.confidence || "medium", note: r.note || "" });
+    } catch (err) {
+      setError("写真の読み取りに失敗しました（AIを使うには「設定」でAPIキーを登録してください。ラベルがはっきり写っているかもご確認ください）。");
+    }
+    setPhotoLoading(false);
+  };
 
   const estimate = async () => {
     if (!text.trim()) return;
@@ -721,6 +766,9 @@ function RecordScreen({ today, foodLog, setFoodLog, favorites, setFavorites }) {
         <div style={{ fontSize: 12.5, color: C.inkSoft, margin: "8px 0 10px", lineHeight: 1.6 }}>テキストで送ると概算します。<b>9:00 / 12:00</b> のように時刻を書けば、その通りタイミングごとに分けて記録します。時刻を書かなければ、いまの時刻が自動で入ります（あとで直せます）。</div>
         <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} placeholder={"例（まとめ書き）：\n9:00 トーストとゆで卵、コーヒー\n12:30 鮭弁当\n19:00 サラダと鶏むね"} style={{ ...inputStyle, resize: "none" }} />
         <PrimaryBtn onClick={estimate} disabled={loading || !text.trim()} style={{ marginTop: 10 }}>{loading ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Send size={15} />} 概算する</PrimaryBtn>
+        <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onPhoto} style={{ display: "none" }} />
+        <GhostBtn onClick={() => fileRef.current && fileRef.current.click()} disabled={photoLoading} style={{ marginTop: 10 }}>{photoLoading ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : <Camera size={16} />} 栄養成分表示を写真で読み取る</GhostBtn>
+        <div style={{ fontSize: 11, color: C.inkFaint, marginTop: 8, lineHeight: 1.6 }}>パッケージの栄養成分表示を撮ると、数値を読み取って下書きにします（写真は保存されません）。</div>
         {error && <div style={{ fontSize: 12, color: C.protein, marginTop: 8 }}>{error}</div>}
       </Card>
 
