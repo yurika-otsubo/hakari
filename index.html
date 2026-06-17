@@ -1,7 +1,6 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <script src="https://cdn.jsdelivr.net/npm/eruda"></script><script>eruda.init();</script>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
 <title>はかり</title>
@@ -21,14 +20,14 @@
   ::placeholder{color:#A8A192;}
   a{color:#5C6650;}
 </style>
-<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.23.5/babel.min.js"></script>
 </head>
 <body>
 <div id="root"></div>
-<script type="text/babel" data-presets="react">
+<script type="text/plain" id="appsrc">
 const { useState, useEffect, useRef, useMemo } = React;
 
 /* ===== brand / model ===== */
@@ -1079,15 +1078,36 @@ _root.render(
 );
 </script>
 <script>
-/* ホーム画面アイコンを実行時に生成（単一ファイルを保つため） */
+(function () {
+  function showErr(msg) {
+    var r = document.getElementById("root");
+    if (r) r.innerHTML = '<div style="font-family:sans-serif;padding:24px;color:#2A271F;line-height:1.7">'
+      + '<div style="font-size:22px;margin-bottom:10px">はかり</div>'
+      + '<div style="font-size:14px;color:#736C5D;margin-bottom:12px">読み込み中に問題が発生しました。再読み込みしても直らない場合は、下の内容を開発者にお伝えください（記録はクラウドに保存されているので消えていません）。</div>'
+      + '<button onclick="location.reload()" style="background:#5C6650;color:#fff;border:none;border-radius:12px;padding:12px 16px;font-weight:700;font-size:14px">再読み込み</button>'
+      + '<pre style="white-space:pre-wrap;word-break:break-word;font-size:11px;color:#B25E3C;background:#FBFAF6;border:1px solid #DAD5C8;border-radius:10px;padding:12px;margin-top:14px">' + msg + '</pre></div>';
+  }
+  try {
+    if (!window.React || !window.ReactDOM) { showErr("React の読み込みに失敗しました。通信環境を確認して再読み込みしてください。"); return; }
+    if (!window.Babel) { showErr("Babel の読み込みに失敗しました。通信環境を確認して再読み込みしてください。"); return; }
+    var src = document.getElementById("appsrc").textContent;
+    var out = Babel.transform(src, { presets: [["react", { runtime: "classic" }]] }).code;
+    var s = document.createElement("script");
+    s.textContent = out;
+    document.body.appendChild(s);
+  } catch (e) {
+    showErr(String(e && (e.stack || e.message) || e));
+  }
+})();
+</script>
+<script>
 (function () {
   try {
     var cv = document.createElement("canvas"); cv.width = cv.height = 512;
     var x = cv.getContext("2d");
     x.fillStyle = "#5C6650";
     var r = 96;
-    x.beginPath();
-    x.moveTo(r, 0); x.arcTo(512, 0, 512, 512, r); x.arcTo(512, 512, 0, 512, r);
+    x.beginPath(); x.moveTo(r, 0); x.arcTo(512, 0, 512, 512, r); x.arcTo(512, 512, 0, 512, r);
     x.arcTo(0, 512, 0, 0, r); x.arcTo(0, 0, 512, 0, r); x.closePath(); x.fill();
     x.strokeStyle = "rgba(255,255,255,.85)"; x.lineWidth = 22;
     x.beginPath(); x.arc(256, 232, 120, -Math.PI * 0.6, Math.PI * 1.25); x.stroke();
